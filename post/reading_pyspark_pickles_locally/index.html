@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta http-equiv="Content-Type" content="text/html" charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+    <title>Reading PySpark pickles locally &middot; source{d} blog</title>
+    <meta name="author" content="source{d}">
+    <meta name="description" content="coding to find awesome engineers">
+    <meta name="generator" content="Hugo 0.15" />
+    <meta name="HandheldFriendly" content="True">
+    <meta name="MobileOptimized" content="320">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+    <link rel="shortcut icon" href="/img/favicon.ico">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/normalize/2.1.2/normalize.min.css">
+
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="/css/screen.css">
+    <link rel="stylesheet" href="/css/github.css">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.3/styles/default.min.css">
+
+    <!-- Stylesheet for theme color -->
+    <style type="text/css">
+    a, a:visited {color: #32526A; font-weight: 600; }
+    .pagination a {color: #111111;}
+    .gist .gist-file .gist-meta a:visited {color: #111111 !important;}
+    a:focus, a:hover {color: #32526A;}
+    h1.post-title, h1.blog-title a, h1.blog-title a {
+      color: #32526A;
+    }
+
+    h1.post-title a:focus, h1.post-title a:hover, h1.blog-title a:focus, h1.blog-title a:hover {
+      color: #000;
+    }
+    .older-posts:hover, .newer-posts:hover {color: #32526A;}
+
+    .post-meta .authorimage {
+      zoom:.5;
+    }
+
+    .post-meta {
+      text-transform: none;
+    }
+
+    .post .post-meta {
+      margin-bottom: 50px;
+    }
+
+    .preview .post-meta p { margin:0; }
+    .preview .post-meta .authorimage {
+      display:none;
+    }
+
+    .preview .image  {
+      height: 90px;
+      margin: auto;
+      overflow: hidden;
+      background-size: cover;
+      background-position: center center;
+    }
+
+    .preview .image img {
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
+    }
+</style>
+
+</head>
+<body class="post-template">
+
+    <div id="nav">
+  <ul class="nav-list">
+    <li class="nav-list-item"><a href="http://sourced.tech">sourced.tech</a></li>
+  </ul>
+</div>
+
+
+<header id="site-head">
+	
+	<h1 class="blog-title"><a href="/">source{d}</a></h1>
+	
+	
+	<h1 class="blog-subtitle">coding to find awesome engineers</h1>
+	
+  <span class="blog-sub-link">Take me to <a href="http://sourced.tech">sourced.tech</a></span>
+</header>
+    
+
+    <main class="content" role="main">
+	    <article class="post">
+	        <header>
+	        <h1 class="post-title">Reading PySpark pickles locally</h1>
+	        <div class="post-meta">
+            
+
+    <div class="authorimage" style="background: url(https://avatars0.githubusercontent.com/u/2793551?v=3&amp;s=460)"></div>
+    <p>
+      by <b>Vadim Markovtsev</b>
+      <time datetime="08 November 2016">08 November 2016</time></div>
+    </p>
+
+
+	        </header>
+	        <section class="post-content">
+	            
+
+<p>I&rsquo;ve recently had a task to merge all the output from Spark in the Pickle format,
+that is, obtained via <code>spark.rdd.RDD.saveAsPickleFile()</code>, in my personal environment
+and conduct some work with it. Surprisingly, no tools exist to read those files,
+however it is relatively easy to do. I started <a href="https://github.com/src-d/sparkpickle">src-d/sparkpickle</a>
+project and this article is about how I created it, with some deep insight into
+the binary format of Hadoop&rsquo;s SequenceFile.</p>
+
+<p>First of all, some explanation of the relevant technologies. PySpark has the ability
+to store the results in HDFS or any other data persistence backend in the efficient
+Python-friendly binary format, <a href="https://docs.python.org/3/library/pickle.html">pickle</a>.
+It is the quick and dirty way to store Python objects, without having to define
+any schema, do custom serialization and messing with general-purpose formats like
+<a href="http://spark.apache.org/docs/latest/sql-programming-guide.html#parquet-files">Parquet</a>.
+Hadoop defines the binary format named <a href="https://wiki.apache.org/hadoop/SequenceFile">SequenceFile</a>.
+It is the stream of key-value pairs, where keys and values must have the uniform
+types, and their class names are stored in the stream header. So basically,
+PySpark writes SequenceFile-s with null keys and blob values.</p>
+
+<p>If you want to read those files on your personal computer and not in the Spark
+cluster environment, you are in trouble: there is simply no way of doing it. You
+have to install Spark, PySpark, connect it to your storage backend, process
+the files and finally pickle the result of <code>collect()</code>.
+That&rsquo;s why I had to write <a href="https://github.com/src-d/sparkpickle">src-d/sparkpickle</a>:
+it is a tiny Python package without <em>any</em> dependencies which allows you to load
+Python objects serialized by PySpark.</p>
+
+<h2 id="saveaspicklefile-internals:70d834cd7a232165ca2fb2dcad051745">saveAsPickleFile() internals</h2>
+
+<p>It appeared that PySpark&rsquo;s <a href="http://spark.apache.org/docs/latest/api/python/pyspark.html#pyspark.RDD.saveAsPickleFile">saveAsPickleFile()</a>
+function works rather complicated. You can refer to it&rsquo;s <a href="https://github.com/apache/spark/blob/branch-2.1/python/pyspark/rdd.py#L1450">source code</a>.
+It works in multiple steps.</p>
+
+<ol>
+<li>Accumulate items in batches. The batch size is configured with the <code>batchSize</code> argument.
+Each batch is the list of Python objects you return or yield in your PySpark RDD pipeline.
+Performed on Python side by <a href="https://github.com/apache/spark/blob/branch-2.1/python/pyspark/serializers.py#L180">BatchedSerializer</a>.</li>
+<li>Each batch is pickled on Python side by <a href="https://github.com/apache/spark/blob/branch-2.1/python/pyspark/serializers.py#L403">PickleSerializer</a>.
+It writes data in frames, each frame is the size of the subsequent data chunk and the chunk itself.
+All integers here and later are written in <a href="https://en.wikipedia.org/wiki/Endianness#Big-endian">big-endian</a> byte order.</li>
+<li>The resulting byte stream is passed into <a href="https://github.com/apache/spark/blob/branch-2.1/core/src/main/scala/org/apache/spark/rdd/RDD.scala#L1497">saveAsObjectFile</a>
+on Scala/JVM side. The frame lengths are discarded so that the next step proceeds with the original data chunks.
+JVM needs prepended lengths because it interoperates with Python workers via sockets and
+needs to know the exact amount of data to read beforehand (<a href="https://github.com/apache/spark/blob/branch-2.1/python/pyspark/worker.py#L167">see the code</a>).</li>
+<li>Each bytes object received from Python is serialized again using <a href="https://docs.oracle.com/javase/7/docs/platform/serialization/spec/protocol.html#10258">Java standard serialization</a>.
+Thus we have serialization inside serialization! <img src="/post/reading_pyspark_pickles_locally/deeper.jpg" alt="deeper.jpg" /></li>
+<li><code>saveAsObjectFile()</code> writes <a href="http://grepcode.com/file/repo1.maven.org/maven2/org.apache.hadoop/hadoop-common/2.7.1/org/apache/hadoop/io/SequenceFile.java#SequenceFile">SequenceFile</a>
+with keys of type <a href="https://www.safaribooksonline.com/library/view/hadoop-the-definitive/9781449328917/ch04.html#id3961179">NullWritable</a>
+and values of type <a href="https://www.safaribooksonline.com/library/view/hadoop-the-definitive/9781449328917/ch04.html#id3960971">BytesWritable</a>
+(the result of the second serialization).</li>
+<li>The Hadoop disk backend (HDFS, S3, GCS, local file system, etc.) actually stores the result.</li>
+</ol>
+
+<h2 id="sequencefile-pickle-format:70d834cd7a232165ca2fb2dcad051745">SequenceFile+pickle format</h2>
+
+<p>Here is what it looks inside:</p>
+
+<p><img src="/post/reading_pyspark_pickles_locally/bin.png" alt="bin" /></p>
+
+<p>The left column is the offsets for the rows. The actual pickle data always starts
+from offset 158. The whole file is divided into &ldquo;records&rdquo;, each record has a header.
+There can be <em>sync marks</em> inserted between records, 16 byte each. The first sync mark goes after
+the top level header which contains the class names for keys and values. All subsequent
+sync marks are prepended with <code>0xffffffff</code> (-1 reinterpreted as unsigned).</p>
+
+<h2 id="sparkpickle:70d834cd7a232165ca2fb2dcad051745">sparkpickle</h2>
+
+<p>So to read the format described above, we don&rsquo;t really need any Spark or Java interop
+in general. The only non-trivial block is the
+<a href="http://www.javaworld.com/article/2072752/the-java-serialization-algorithm-revealed.html">Java standard serialization</a>
+for byte arrays. In theory, we could use fixed offsets and do not care about the serialization at all.
+In practice, Java serialization may use variable length integer encoding, so it&rsquo;s not always a good idea.
+I decided to handle it properly so that I could catch possible corruption errors earlier, before unpickling.
+While unpickling is robust, in some cases it may perform unexpected operations if started from the wrong offset.
+There is a nice project named <a href="https://github.com/tcalmant/python-javaobj">javaobj</a> which is
+a pure Python implementation for Java standard serialization, it worked out of the box
+and matched perfectly.</p>
+
+<p>The usage of the resulting package is very easy and feels the same as working
+with <code>pickle</code> package directly. E.g.,</p>
+
+<pre><code>with open(&quot;/path/to/sequence/file&quot;, &quot;rb&quot;) as f:
+    print(sparkpickle.load(f))
+</code></pre>
+
+<p>To quickly dump the contents of the file in terminal, execute</p>
+
+<pre><code>python -m sparkpickle /path/to/sequence/file
+</code></pre>
+
+<p>The package was uploaded to the <a href="https://wiki.python.org/moin/CheeseShop">cheese shop</a>,
+so is easily installable via <code>pip install sparkpickle</code>.</p>
+
+<h2 id="summary:70d834cd7a232165ca2fb2dcad051745">Summary</h2>
+
+<p>Saving Python objects in pickle format on Spark appeared to be not very efficient
+because of the double serialization and several copies of the same data. Nevertheless,
+it is pretty possible to read those files (fast) without having to install Spark thanks to
+<a href="https://github.com/src-d/sparkpickle">sparkpickle</a>.</p>
+
+	        </section>
+
+          <footer class="post-footer">
+              
+
+<section class="author">
+    <div class="authorimage" style="background: url(https://avatars0.githubusercontent.com/u/2793551?v=3&amp;s=460)"></div>
+    <h4>
+      Vadim Markovtsev
+      
+      <a href="//github.com/vmarkovtsev" target="_blank" title="GitHub">
+        <i class="fa fa-2x fa-fw fa-github"></i>
+        <span class="hidden">GitHub</span>
+      </a>
+      
+      
+      <a href="//twitter.com/@tmarkhor" target="_blank" title="Twitter">
+        <i class="fa fa-2x fa-fw fa-twitter"></i>
+        <span class="hidden">Twitter</span>
+      </a>
+      
+    </h4>
+
+    <p class="meta">
+    </p>
+
+    <p class="bio">A former system programmer, Vadim is now a machine learning engineer in love with deep neural networks.</p>
+
+</section>
+
+
+          </footer>
+
+          <section class="mailchimp">  
+            
+            <link href="//cdn-images.mailchimp.com/embedcode/horizontal-slim-10_7.css" rel="stylesheet" type="text/css">
+            <style type="text/css">
+              #mc_embed_signup{background:#fff; clear:left; font:14px Helvetica,Arial,sans-serif; width:100%;}
+               
+            </style>
+            <div id="mc_embed_signup">
+            <form action="//tech.us13.list-manage.com/subscribe/post?u=0eae08951c21c9bca382c2c2e&amp;id=9814bef9fd" method="post" id="mc-embedded-subscribe-form" name="mc-embedded-subscribe-form" class="validate" target="_blank" novalidate>
+                <div id="mc_embed_signup_scroll">
+              <label for="mce-EMAIL">Receive new posts via email</label>
+              <input type="email" value="" name="EMAIL" class="email" id="mce-EMAIL" placeholder="email address" required>
+                
+                <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_0eae08951c21c9bca382c2c2e_9814bef9fd" tabindex="-1" value=""></div>
+                <div class="clear"><input type="submit" value="Subscribe" name="subscribe" id="mc-embedded-subscribe" class="button"></div>
+                </div>
+            </form>
+            </div>
+            
+          </section>
+
+			
+	        	
+	        
+
+			
+
+
+	        <section class="share">
+	            <p class="backtotop"><a data-scroll href="#site-head"><i class="fa fa-lg fa-fw fa-angle-double-up"></i></a><a data-scroll class="backtotoptext" href="#site-head"> Back to top</a></p>
+	            <p class="info prompt">Share</p>
+	            <a href="http://twitter.com/share?text=Reading%20PySpark%20pickles%20locally&url=%2fpost%2freading_pyspark_pickles_locally%2f" title="Share on Twitter"
+	                onclick="window.open(this.href, 'twitter-share', 'width=550,height=235');return false;">
+	                <i class="fa fa-2x fa-fw fa-twitter-square"></i> <span class="hidden">Twitter</span>
+	            </a>
+	            <a href="https://www.facebook.com/sharer/sharer.php?u=%2fpost%2freading_pyspark_pickles_locally%2f" title="Share on Facebook"
+	                onclick="window.open(this.href, 'facebook-share','width=580,height=296');return false;">
+	                <i class="fa fa-2x fa-fw fa-facebook-square" style="margin-left: -8px"></i> <span class="hidden">Facebook</span>
+	            </a>
+	            <a href="https://plus.google.com/share?url=%2fpost%2freading_pyspark_pickles_locally%2f" title="Share on Google+"
+	               onclick="window.open(this.href, 'google-plus-share', 'width=490,height=530');return false;">
+	                <i class="fa fa-2x fa-fw fa-google-plus-square" style="margin-left: -8px"></i> <span class="hidden">Google+</span>
+	            </a>
+	        </section>
+
+
+	    </article>
+	</main>
+
+    <footer class="site-footer">
+	<div class="inner">
+		<section class="footer-social">
+			
+		    <a href="//twitter.com/srcd_" target="_blank" title="Twitter"><i class="fa fa-2x fa-fw fa-twitter"></i> <span class="hidden">Twitter</span></a>&nbsp;
+		    
+		    
+		    <a href="//github.com/src-d" target="_blank" title="GitHub"><i class="fa fa-2x fa-fw fa-github"></i> <span class="hidden">GitHub</span></a>&nbsp;
+		    
+		    
+		</section>
+
+		<section class="copyright">&copy; 2016 <a href="/">source{d}</a>. Crafted with love.</section>
+	</div>
+</footer>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+<script src="/js/index.js"></script>
+<script src="/js/smooth-scroll.min.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.3/highlight.min.js"></script>
+
+<script>
+    smoothScroll.init({
+        speed: 800,
+        easing: 'easeInOutCubic',
+        updateURL: false,
+        offset: 125,
+    });
+</script>
+<script>hljs.initHighlightingOnLoad();</script>
+
+
+<!-- Google Analytics -->
+<script>
+  var _gaq=[['_setAccount','UA-69608223-2'],['_trackPageview']];
+  (function(d,t){var g=d.createElement(t),s=d.getElementsByTagName(t)[0];
+  g.src=('https:'==location.protocol?'//ssl':'//www')+'.google-analytics.com/ga.js';
+  s.parentNode.insertBefore(g,s)}(document,'script'));
+</script>
+
+
+
+<script>
+   (function(h,o,t,j,a,r){
+       h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
+       h._hjSettings={hjid:184958,hjsv:5};
+       a=o.getElementsByTagName('head')[0];
+       r=o.createElement('script');r.async=1;
+       r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;
+       a.appendChild(r);
+   })(window,document,'//static.hotjar.com/c/hotjar-','.js?sv=');
+</script>
+
+<script type="text/javascript">
+    adroll_adv_id = "IYZYMSZIZZGURCHNYRRKTA";
+    adroll_pix_id = "MXWTIGH3ZNCXDAD4UGQIW5";
+     
+     
+    (function () {
+        var _onload = function(){
+            if (document.readyState && !/loaded|complete/.test(document.readyState)){setTimeout(_onload, 10);return}
+            if (!window.__adroll_loaded){__adroll_loaded=true;setTimeout(_onload, 50);return}
+            var scr = document.createElement("script");
+            var host = (("https:" == document.location.protocol) ? "https://s.adroll.com" : "http://a.adroll.com");
+            scr.setAttribute('async', 'true');
+            scr.type = "text/javascript";
+            scr.src = host + "/j/roundtrip.js";
+            ((document.getElementsByTagName('head') || [null])[0] ||
+                document.getElementsByTagName('script')[0].parentNode).appendChild(scr);
+        };
+        if (window.addEventListener) {window.addEventListener('load', _onload, false);}
+        else {window.attachEvent('onload', _onload)}
+    }());
+</script>
+
+
+</body>
+</html>

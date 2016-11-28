@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta http-equiv="Content-Type" content="text/html" charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+    <title>397 Languages, 18,000,000 GitHub repositories, 1.2 billion files, 20 terabytes of code: Spaces or Tabs &middot; source{d} blog</title>
+    <meta name="author" content="source{d}">
+    <meta name="description" content="coding to find awesome engineers">
+    <meta name="generator" content="Hugo 0.15" />
+    <meta name="HandheldFriendly" content="True">
+    <meta name="MobileOptimized" content="320">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+    <link rel="shortcut icon" href="/img/favicon.ico">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/normalize/2.1.2/normalize.min.css">
+
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="/css/screen.css">
+    <link rel="stylesheet" href="/css/github.css">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.3/styles/default.min.css">
+
+    <!-- Stylesheet for theme color -->
+    <style type="text/css">
+    a, a:visited {color: #32526A; font-weight: 600; }
+    .pagination a {color: #111111;}
+    .gist .gist-file .gist-meta a:visited {color: #111111 !important;}
+    a:focus, a:hover {color: #32526A;}
+    h1.post-title, h1.blog-title a, h1.blog-title a {
+      color: #32526A;
+    }
+
+    h1.post-title a:focus, h1.post-title a:hover, h1.blog-title a:focus, h1.blog-title a:hover {
+      color: #000;
+    }
+    .older-posts:hover, .newer-posts:hover {color: #32526A;}
+
+    .post-meta .authorimage {
+      zoom:.5;
+    }
+
+    .post-meta {
+      text-transform: none;
+    }
+
+    .post .post-meta {
+      margin-bottom: 50px;
+    }
+
+    .preview .post-meta p { margin:0; }
+    .preview .post-meta .authorimage {
+      display:none;
+    }
+
+    .preview .image  {
+      height: 90px;
+      margin: auto;
+      overflow: hidden;
+      background-size: cover;
+      background-position: center center;
+    }
+
+    .preview .image img {
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
+    }
+</style>
+
+</head>
+<body class="post-template">
+
+    <div id="nav">
+  <ul class="nav-list">
+    <li class="nav-list-item"><a href="http://sourced.tech">sourced.tech</a></li>
+  </ul>
+</div>
+
+
+<header id="site-head">
+	
+	<h1 class="blog-title"><a href="/">source{d}</a></h1>
+	
+	
+	<h1 class="blog-subtitle">coding to find awesome engineers</h1>
+	
+  <span class="blog-sub-link">Take me to <a href="http://sourced.tech">sourced.tech</a></span>
+</header>
+    
+
+    <main class="content" role="main">
+	    <article class="post">
+	        <header>
+	        <h1 class="post-title">397 Languages, 18,000,000 GitHub repositories, 1.2 billion files, 20 terabytes of code: Spaces or Tabs</h1>
+	        <div class="post-meta">
+            
+
+    <div class="authorimage" style="background: url(https://avatars0.githubusercontent.com/u/2793551?v=3&amp;s=460)"></div>
+    <p>
+      by <b>Vadim Markovtsev</b>
+      <time datetime="13 September 2016">13 September 2016</time></div>
+    </p>
+
+
+	        </header>
+	        <section class="post-content">
+	            
+
+<p>Tabs or spaces. We are going to parse every file among all programming languages known by GitHub to decide which one is on top.</p>
+
+<p><a href="http://content.blog.sourced.tech/tabs_spaces/index.html"><img src="/post/tab_vs_spaces/intro.png" alt="image" /></a></p>
+
+<p>This was inspired by Felipe Hoffa&rsquo;s analysis of 400k repositories and 14 programming languages (<a href="https://medium.com/@hoffa/400-000-github-repositories-1-billion-files-14-terabytes-of-code-spaces-or-tabs-7cfe0b5dd7fd">here</a>).</p>
+
+<p><a href="http://content.blog.sourced.tech/tabs_spaces/index.html">Interactive results presentation.</a></p>
+
+<p><a href="https://github.com/src-d/tab-vs-spaces">GitHub repository with the data.</a></p>
+
+<h2 id="the-rules:9edd4be61dc387ef67022a23b3bf6f4c">The rules</h2>
+
+<ul>
+<li>Data source: GitHub files stored in source{d}&rsquo;s own GitHub mirror as of July 2016.</li>
+<li>Stars don&rsquo;t matter: we’ll consider every repository. Everybody votes disregarding elitism. It appears that the 80-20 principle holds for GitHub, so unpopular repos do not constitute a substantial bias after all.</li>
+<li>Every file is analyzed: there are a lot of small files in some languages; &ldquo;hello, world&rdquo; counts.</li>
+<li>No duplicates: forks are not taken into account. Hard forks (those not marked as a fork by GitHub but really are, the number is about 800k) are not counted as well. From one side, this does not guarantee uniqueness of each file in particular; from the other side, slightly different files from hard forks are excluded from the analysis. Since a typical GitHub hard fork is something like Linux kernel, it makes sense.</li>
+<li>One vote per line: we consider the sum of line votes. Some lines are indented with a mix of spaces with tabs. We’ll place such into the third category, &ldquo;mixed&rdquo;.</li>
+<li>All languages: we’ll look into all files and determine the language using <code>simple-linguist</code> which is
+source{d}&rsquo;s super fast reimplementation of <a href="https://github.com/github/linguist">github/linguist</a> in Go.
+It&rsquo;s way more reliable than simply using file extensions. E.g. .cs files can be either C# or Smalltalk,
+.h files belong to C, C++ and Obj-C.</li>
+</ul>
+
+<h2 id="numbers:9edd4be61dc387ef67022a23b3bf6f4c">Numbers</h2>
+
+<p>The raw numbers are stored in JSON on <a href="https://github.com/src-d/tab-vs-spaces/blob/master/tabs_spaces.json">GitHub</a>.
+The total number of languages processed is 397. The following table reflects the statistics for some randomly picked ones:</p>
+
+<table>
+<thead>
+<tr>
+<th align="left">language</th>
+<th align="right">bytes,GB</th>
+<th align="right">files,M</th>
+<th align="right">lines,M</th>
+<th align="right">mixed,M</th>
+<th align="right">spaces,M</th>
+<th align="right">tabs,M</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td align="left">JavaScript</td>
+<td align="right">2,341</td>
+<td align="right">253.62</td>
+<td align="right">58,906</td>
+<td align="right">1,174</td>
+<td align="right">37,690</td>
+<td align="right">7,595</td>
+</tr>
+
+<tr>
+<td align="left">XML</td>
+<td align="right">2,479</td>
+<td align="right">56.93</td>
+<td align="right">41,546</td>
+<td align="right">158</td>
+<td align="right">35,423</td>
+<td align="right">2,794</td>
+</tr>
+
+<tr>
+<td align="left">PHP</td>
+<td align="right">1,069</td>
+<td align="right">163.01</td>
+<td align="right">31,515</td>
+<td align="right">1,464</td>
+<td align="right">15,795</td>
+<td align="right">7,712</td>
+</tr>
+
+<tr>
+<td align="left">HTML</td>
+<td align="right">1,309</td>
+<td align="right">81.07</td>
+<td align="right">21,698</td>
+<td align="right">256</td>
+<td align="right">7,122</td>
+<td align="right">3,545</td>
+</tr>
+
+<tr>
+<td align="left">JSON</td>
+<td align="right">1,125</td>
+<td align="right">51.94</td>
+<td align="right">14,421</td>
+<td align="right">15</td>
+<td align="right">12,115</td>
+<td align="right">998</td>
+</tr>
+
+<tr>
+<td align="left">C</td>
+<td align="right">505</td>
+<td align="right">38.99</td>
+<td align="right">14,118</td>
+<td align="right">331</td>
+<td align="right">5,632</td>
+<td align="right">2,279</td>
+</tr>
+
+<tr>
+<td align="left">Java</td>
+<td align="right">352</td>
+<td align="right">72.36</td>
+<td align="right">10,285</td>
+<td align="right">390</td>
+<td align="right">5,483</td>
+<td align="right">2,251</td>
+</tr>
+
+<tr>
+<td align="left">C++</td>
+<td align="right">326</td>
+<td align="right">34.62</td>
+<td align="right">9,440</td>
+<td align="right">89</td>
+<td align="right">4,397</td>
+<td align="right">1,553</td>
+</tr>
+
+<tr>
+<td align="left">Python</td>
+<td align="right">241</td>
+<td align="right">34.23</td>
+<td align="right">6,140</td>
+<td align="right">5</td>
+<td align="right">4,126</td>
+<td align="right">178</td>
+</tr>
+
+<tr>
+<td align="left">C#</td>
+<td align="right">137</td>
+<td align="right">29.71</td>
+<td align="right">3,675</td>
+<td align="right">15</td>
+<td align="right">2,248</td>
+<td align="right">665</td>
+</tr>
+
+<tr>
+<td align="left">Ruby</td>
+<td align="right">98</td>
+<td align="right">49.49</td>
+<td align="right">2,965</td>
+<td align="right">6</td>
+<td align="right">2,141</td>
+<td align="right">77</td>
+</tr>
+
+<tr>
+<td align="left">Go</td>
+<td align="right">21</td>
+<td align="right">2.87</td>
+<td align="right">642</td>
+<td align="right">0.7</td>
+<td align="right">12</td>
+<td align="right">434</td>
+</tr>
+</tbody>
+</table>
+
+<style>th { padding-left: 0.5em; padding-right: 0.5em; }</style>
+
+<h2 id="how-to:9edd4be61dc387ef67022a23b3bf6f4c">How-to</h2>
+
+<p>Well, I have to admit that this is not something that one can do in his or her garage.
+I used 32-node <a href="https://cloud.google.com/dataproc/">Dataproc</a> Spark cluster in n1-highmem-4 configuration
+(that is, 4 cores and 26 GB RAM). Normally I use preemptible nodes which are 3 times cheaper though can be
+restarted at any time. Not at this time: Spark stores the reduction&rsquo;s intermediate results
+in memory and I didn&rsquo;t have time to mess with the persistence option. I guess I could use
+preemptible nodes if I was a Spark guru after all.</p>
+
+<p>The job took about 2 days (left it running for the weekend). I had to find the best cluster parameters so
+I recreated the cluster several times and this is where <a href="https://github.com/src-d/jgscm">source{d}&rsquo;s Jupyter Cloud Storage backend</a>
+shined. Read more about how I use Dataproc with Jupyter in the <a href="http://blog.sourced.tech/post/dataproc_jupyter/">previous article</a>.
+Doing everything in the same Python environment from your web browser with unlimited computing resources?
+That&rsquo;s why I like Jupyter+Dataproc.</p>
+
+<p>Here is the most important source code part which does the line indentation analysis:</p>
+
+<pre><code class="language-python">def extract_stats(name, session=requests):
+    with tmpdir(name) as outdir:
+        if not fetch_repo(name, outdir, session):
+            return {}
+        clusters = json.loads(subprocess.check_output([&quot;slinguist&quot;], cwd=outdir).decode(&quot;utf-8&quot;))
+        result = {}
+        for lang, files in clusters.items():
+            if lang == &quot;Other&quot;:
+                continue
+            result[lang] = lr = {}
+            tabs = spaces = mixed = srcbytes = srclines = 0
+            for file in files:
+                try:
+                    with open(os.path.join(outdir, file), &quot;rb&quot;) as fobj:
+                        for line in fobj:
+                            srclines += 1
+                            if not line:
+                                continue
+                            p = 1
+                            c = line[0]
+                            if c == ord(b' '):
+                                spaces += 1
+                                while p &lt; len(line):
+                                    c = line[p]
+                                    if c == ord(b'\t'):
+                                        mixed += 1
+                                        spaces -= 1
+                                        break
+                                    elif c != ord(b' '):
+                                        break
+                                    p += 1
+                            elif c == ord(b'\t'):
+                                tabs += 1
+                                while p &lt; len(line):                                
+                                    c = line[p]
+                                    if c == ord(b' '):
+                                        mixed += 1
+                                        tabs -= 1
+                                        break
+                                    elif c != ord(b'\t'):
+                                        break
+                                    p += 1
+                        srcbytes += fobj.tell()
+                except:
+                    continue
+            lr.update({
+                &quot;spaces&quot;: spaces,
+                &quot;tabs&quot;: tabs,
+                &quot;mixed&quot;: mixed,
+                &quot;bytes&quot;: srcbytes,
+                &quot;lines&quot;: srclines,
+                &quot;files&quot;: len(files)
+            })
+        return result
+</code></pre>
+
+<p>This approach feels better than counting single votes from files. E.g., read
+<a href="https://habrahabr.ru/post/308974/#comment_9784722">here</a> why (sorry, the discussion is in Russian).</p>
+
+<p>I&rsquo;d like to notice that the sum of lines indented with spaces, tabs and mix of them is
+less than the overall number of lines since there are empty and unindented lines
+as well.</p>
+
+<p>As for the <a href="http://content.blog.sourced.tech/tabs_spaces/index.html">interactive demo app</a>,
+I used good ol&rsquo; <a href="http://matplotlib.org/">matplotlib</a> to draw the initial SVG and the awesome
+<a href="https://d3js.org/">d3.js</a> for the rest. I applied <a href="https://lvdmaaten.github.io/tsne/">t-SNE</a>
+clustering to the language vectors so that similar ones appear near each other.
+The radius of each pie chart is proportional to the square root
+of the number of lines written in the corresponding language.
+Special thanks goes to <a href="https://github.com/mvader">Miguel</a> for turning my pathetic HTML into an eye-candy.</p>
+
+<h2 id="which-one-is-on-top:9edd4be61dc387ef67022a23b3bf6f4c">Which one is on top?</h2>
+
+<p>Spaces are used for indentation in the majority of the languages. The exclusions
+in the lower-left cluster are: Go, ActionScript, PostScript, Assembly (GAS),
+Makefile, Mathematica and JSP.</p>
+
+<h2 id="more:9edd4be61dc387ef67022a23b3bf6f4c">More?</h2>
+
+<p>Want more stories? How about writing them yourself? <a href="mailto:talent@sourced.tech">Join us.</a></p>
+
+	        </section>
+
+          <footer class="post-footer">
+              
+
+<section class="author">
+    <div class="authorimage" style="background: url(https://avatars0.githubusercontent.com/u/2793551?v=3&amp;s=460)"></div>
+    <h4>
+      Vadim Markovtsev
+      
+      <a href="//github.com/vmarkovtsev" target="_blank" title="GitHub">
+        <i class="fa fa-2x fa-fw fa-github"></i>
+        <span class="hidden">GitHub</span>
+      </a>
+      
+      
+      <a href="//twitter.com/@tmarkhor" target="_blank" title="Twitter">
+        <i class="fa fa-2x fa-fw fa-twitter"></i>
+        <span class="hidden">Twitter</span>
+      </a>
+      
+    </h4>
+
+    <p class="meta">
+    </p>
+
+    <p class="bio">A former system programmer, Vadim is now a machine learning engineer in love with deep neural networks.</p>
+
+</section>
+
+
+          </footer>
+
+          <section class="mailchimp">  
+            
+            <link href="//cdn-images.mailchimp.com/embedcode/horizontal-slim-10_7.css" rel="stylesheet" type="text/css">
+            <style type="text/css">
+              #mc_embed_signup{background:#fff; clear:left; font:14px Helvetica,Arial,sans-serif; width:100%;}
+               
+            </style>
+            <div id="mc_embed_signup">
+            <form action="//tech.us13.list-manage.com/subscribe/post?u=0eae08951c21c9bca382c2c2e&amp;id=9814bef9fd" method="post" id="mc-embedded-subscribe-form" name="mc-embedded-subscribe-form" class="validate" target="_blank" novalidate>
+                <div id="mc_embed_signup_scroll">
+              <label for="mce-EMAIL">Receive new posts via email</label>
+              <input type="email" value="" name="EMAIL" class="email" id="mce-EMAIL" placeholder="email address" required>
+                
+                <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_0eae08951c21c9bca382c2c2e_9814bef9fd" tabindex="-1" value=""></div>
+                <div class="clear"><input type="submit" value="Subscribe" name="subscribe" id="mc-embedded-subscribe" class="button"></div>
+                </div>
+            </form>
+            </div>
+            
+          </section>
+
+			
+	        	
+	        
+
+			
+
+
+	        <section class="share">
+	            <p class="backtotop"><a data-scroll href="#site-head"><i class="fa fa-lg fa-fw fa-angle-double-up"></i></a><a data-scroll class="backtotoptext" href="#site-head"> Back to top</a></p>
+	            <p class="info prompt">Share</p>
+	            <a href="http://twitter.com/share?text=397%20Languages%2c%2018%2c000%2c000%20GitHub%20repositories%2c%201.2%20billion%20files%2c%2020%20terabytes%20of%20code%3a%20Spaces%20or%20Tabs&url=%2fpost%2ftab_vs_spaces%2f" title="Share on Twitter"
+	                onclick="window.open(this.href, 'twitter-share', 'width=550,height=235');return false;">
+	                <i class="fa fa-2x fa-fw fa-twitter-square"></i> <span class="hidden">Twitter</span>
+	            </a>
+	            <a href="https://www.facebook.com/sharer/sharer.php?u=%2fpost%2ftab_vs_spaces%2f" title="Share on Facebook"
+	                onclick="window.open(this.href, 'facebook-share','width=580,height=296');return false;">
+	                <i class="fa fa-2x fa-fw fa-facebook-square" style="margin-left: -8px"></i> <span class="hidden">Facebook</span>
+	            </a>
+	            <a href="https://plus.google.com/share?url=%2fpost%2ftab_vs_spaces%2f" title="Share on Google+"
+	               onclick="window.open(this.href, 'google-plus-share', 'width=490,height=530');return false;">
+	                <i class="fa fa-2x fa-fw fa-google-plus-square" style="margin-left: -8px"></i> <span class="hidden">Google+</span>
+	            </a>
+	        </section>
+
+
+	    </article>
+	</main>
+
+    <footer class="site-footer">
+	<div class="inner">
+		<section class="footer-social">
+			
+		    <a href="//twitter.com/srcd_" target="_blank" title="Twitter"><i class="fa fa-2x fa-fw fa-twitter"></i> <span class="hidden">Twitter</span></a>&nbsp;
+		    
+		    
+		    <a href="//github.com/src-d" target="_blank" title="GitHub"><i class="fa fa-2x fa-fw fa-github"></i> <span class="hidden">GitHub</span></a>&nbsp;
+		    
+		    
+		</section>
+
+		<section class="copyright">&copy; 2016 <a href="/">source{d}</a>. Crafted with love.</section>
+	</div>
+</footer>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+<script src="/js/index.js"></script>
+<script src="/js/smooth-scroll.min.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.3/highlight.min.js"></script>
+
+<script>
+    smoothScroll.init({
+        speed: 800,
+        easing: 'easeInOutCubic',
+        updateURL: false,
+        offset: 125,
+    });
+</script>
+<script>hljs.initHighlightingOnLoad();</script>
+
+
+<!-- Google Analytics -->
+<script>
+  var _gaq=[['_setAccount','UA-69608223-2'],['_trackPageview']];
+  (function(d,t){var g=d.createElement(t),s=d.getElementsByTagName(t)[0];
+  g.src=('https:'==location.protocol?'//ssl':'//www')+'.google-analytics.com/ga.js';
+  s.parentNode.insertBefore(g,s)}(document,'script'));
+</script>
+
+
+
+<script>
+   (function(h,o,t,j,a,r){
+       h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
+       h._hjSettings={hjid:184958,hjsv:5};
+       a=o.getElementsByTagName('head')[0];
+       r=o.createElement('script');r.async=1;
+       r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;
+       a.appendChild(r);
+   })(window,document,'//static.hotjar.com/c/hotjar-','.js?sv=');
+</script>
+
+<script type="text/javascript">
+    adroll_adv_id = "IYZYMSZIZZGURCHNYRRKTA";
+    adroll_pix_id = "MXWTIGH3ZNCXDAD4UGQIW5";
+     
+     
+    (function () {
+        var _onload = function(){
+            if (document.readyState && !/loaded|complete/.test(document.readyState)){setTimeout(_onload, 10);return}
+            if (!window.__adroll_loaded){__adroll_loaded=true;setTimeout(_onload, 50);return}
+            var scr = document.createElement("script");
+            var host = (("https:" == document.location.protocol) ? "https://s.adroll.com" : "http://a.adroll.com");
+            scr.setAttribute('async', 'true');
+            scr.type = "text/javascript";
+            scr.src = host + "/j/roundtrip.js";
+            ((document.getElementsByTagName('head') || [null])[0] ||
+                document.getElementsByTagName('script')[0].parentNode).appendChild(scr);
+        };
+        if (window.addEventListener) {window.addEventListener('load', _onload, false);}
+        else {window.attachEvent('onload', _onload)}
+    }());
+</script>
+
+
+</body>
+</html>

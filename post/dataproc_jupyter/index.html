@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta http-equiv="Content-Type" content="text/html" charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+    <title>Setting up Google Cloud Dataproc with Jupyter and Python 3 stack &middot; source{d} blog</title>
+    <meta name="author" content="source{d}">
+    <meta name="description" content="coding to find awesome engineers">
+    <meta name="generator" content="Hugo 0.15" />
+    <meta name="HandheldFriendly" content="True">
+    <meta name="MobileOptimized" content="320">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+    <link rel="shortcut icon" href="/img/favicon.ico">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/normalize/2.1.2/normalize.min.css">
+
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="/css/screen.css">
+    <link rel="stylesheet" href="/css/github.css">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.3/styles/default.min.css">
+
+    <!-- Stylesheet for theme color -->
+    <style type="text/css">
+    a, a:visited {color: #32526A; font-weight: 600; }
+    .pagination a {color: #111111;}
+    .gist .gist-file .gist-meta a:visited {color: #111111 !important;}
+    a:focus, a:hover {color: #32526A;}
+    h1.post-title, h1.blog-title a, h1.blog-title a {
+      color: #32526A;
+    }
+
+    h1.post-title a:focus, h1.post-title a:hover, h1.blog-title a:focus, h1.blog-title a:hover {
+      color: #000;
+    }
+    .older-posts:hover, .newer-posts:hover {color: #32526A;}
+
+    .post-meta .authorimage {
+      zoom:.5;
+    }
+
+    .post-meta {
+      text-transform: none;
+    }
+
+    .post .post-meta {
+      margin-bottom: 50px;
+    }
+
+    .preview .post-meta p { margin:0; }
+    .preview .post-meta .authorimage {
+      display:none;
+    }
+
+    .preview .image  {
+      height: 90px;
+      margin: auto;
+      overflow: hidden;
+      background-size: cover;
+      background-position: center center;
+    }
+
+    .preview .image img {
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
+    }
+</style>
+
+</head>
+<body class="post-template">
+
+    <div id="nav">
+  <ul class="nav-list">
+    <li class="nav-list-item"><a href="http://sourced.tech">sourced.tech</a></li>
+  </ul>
+</div>
+
+
+<header id="site-head">
+	
+	<h1 class="blog-title"><a href="/">source{d}</a></h1>
+	
+	
+	<h1 class="blog-subtitle">coding to find awesome engineers</h1>
+	
+  <span class="blog-sub-link">Take me to <a href="http://sourced.tech">sourced.tech</a></span>
+</header>
+    
+
+    <main class="content" role="main">
+	    <article class="post">
+	        <header>
+	        <h1 class="post-title">Setting up Google Cloud Dataproc with Jupyter and Python 3 stack</h1>
+	        <div class="post-meta">
+            
+
+    <div class="authorimage" style="background: url(https://avatars0.githubusercontent.com/u/2793551?v=3&amp;s=460)"></div>
+    <p>
+      by <b>Vadim Markovtsev</b>
+      <time datetime="15 August 2016">15 August 2016</time></div>
+    </p>
+
+
+	        </header>
+	        <section class="post-content">
+	            
+
+<p>Modern big data world is hard to imagine without <a href="http://hadoop.apache.org/">Hadoop</a>.
+It made a small revolution in how analysts deal with large amount of emerging data
+(before Hadoop, it used to be a torture). <a href="https://spark.apache.org/">Spark</a> is
+&ldquo;Hadoop 2.0&rdquo;, it much improves on the original MapReduce engine.</p>
+
+<p><a href="https://cloud.google.com/dataproc/">Google Cloud Dataproc</a> is a nice solution
+to work with managed Spark stack. Inside, it is a set of VMs one of which is master
+node and the rest are workers. You can SSH to any VM in the cluster if you
+want to fix/try/change something. There are two things which make Dataproc
+different from the usual Compute Engine:</p>
+
+<ol>
+<li>Each node runs a set of Google&rsquo;s systemd services to manage Hadoop/Spark.</li>
+<li>Cloud Console shows nice UI where you can inspect or launch the jobs.</li>
+</ol>
+
+<p>Data scientists which use Python as the primary language like Spark because it has
+<a href="https://spark.apache.org/docs/latest/programming-guide.html">PySpark</a>. PySpark
+allows running Spark jobs written in Python using
+<a href="http://spark.apache.org/docs/latest/api/python/pyspark.html">sensible API</a>.
+Technically, it is a Python package which talks to the Spark&rsquo;s master node.</p>
+
+<p><a href="http://jupyter.org/">Jupyter</a> is a widely known language-agnostic project
+which allows almost WYSIWUG coding in web browser or terminal. Traditional
+scientists and engineers would say that it was inspired by
+<a href="http://www.mathworks.com/products/matlab/?requestedDomain=www.mathworks.com">Matlab</a>
+and alike. While this is true, Matlab inspired the whole scientific Python stack,
+notably <a href="https://docs.scipy.org/doc/numpy-dev/user/numpy-for-matlab-users.html">numpy</a>
+and <a href="http://matplotlib.org/">matplotlib</a>. Jupyter is relatively young; it grew
+from <a href="https://ipython.org/">IPython</a> and originally was tied to Python language.
+Actually, some people still mess Jupyter with IPython and the official website
+has the special clarification about the statuses of those two projects.</p>
+
+<p>So a natural idea about how to use Dataproc for a pythonista is to
+run Jupyter Notebook and work with Spark using PySpark. This longread
+elaborates on how to deploy modern Jupyter over Python 3 to Dataproc and efficiently
+use it. Particularly, we present <a href="https://github.com/src-d/jgscm">JGSCM</a>, an adapter
+between Jupyter virtual file system and Google Cloud Storage. And before you ask:
+this is kind of trickier than in the
+<a href="https://cloud.google.com/dataproc/tutorials/jupyter-notebook">official how-to</a>
+and not the same as <a href="https://cloud.google.com/datalab">Cloud Datalab</a>.</p>
+
+<h2 id="jupyter-python-3-dataproc-take-any-two:971cbc9cc6767562e5cebc6401bc5555">Jupyter, Python 3, Dataproc: take any two</h2>
+
+<p>There is no need to introduce anybody to Python. The fun is to write about
+the battle between Python 2 and Python 3. A long time ago (in 2008) there was
+<a href="https://www.python.org/download/releases/2.6/">Python 2.6</a>. In the same year,
+core developers released the next, not backward-compatible version which they named
+<a href="https://www.python.org/download/releases/3.0/">Python 3k</a>. Basically, it threw
+away some legacy constraints, unified API, did brilliant job with refactoring strings
+(<a href="http://lucumr.pocoo.org/2014/1/5/unicode-in-2-and-3/">some argue</a>) and did other
+useful and cool things which would be impossible to do otherwise. Due to it&rsquo;s
+backward-incompatible nature, Python 3 could not be adopted fast, and the two
+versions continued to exist and develop together. Finally, 2.x branch stopped
+at 2.7 bugfixes (latest is <a href="https://www.python.org/downloads/release/python-2712/">2.7.12</a>)
+and 3.x branch won. Yet still many developers use 2.x for various reasons and
+their number gradually decrease.</p>
+
+<p>Of course, starting a new project in Python 2.7 in 2016 is a mistake (if
+you do not have special <a href="https://caniusepython3.com/">requirements</a>). Yet still
+we sometimes read modern articles about doing something in language which is 8
+years old by it&rsquo;s nature. One example is the <a href="https://cloud.google.com/dataproc/tutorials/jupyter-notebook">official Jupyter in Dataproc</a>
+how-to from Google. Since there is no better option, let&rsquo;s use that as a baseline
+and try to replace Python 2 with Python 3.</p>
+
+<h2 id="creating-dataproc-cluster:971cbc9cc6767562e5cebc6401bc5555">Creating Dataproc cluster</h2>
+
+<p>While it is possible to create Dataproc clusters through command line, web UI
+feels more comfortable for a new user. You should go to Google Cloud Platform Console,
+then enter Dataproc in Products &amp; services (top-left ≡). There is a button to
+create a new cluster on the top.</p>
+
+<p>The interesting part is specifying the custom cluster initialization script.
+It is an ordinary Bash script which is run under root user on master and each of
+the workers during cluster creation. To supply it, click &ldquo;Preemptible workers,
+bucket, network, version, initialization, &amp; access options&rdquo;:</p>
+
+<p><img src="/post/dataproc_jupyter/dataproc1.png" alt="Dataproc1" /></p>
+
+<p>and then enter the path to the initialization script in Google Cloud Storage
+(yes, it must be uploaded to GCS, to web links):</p>
+
+<p><img src="/post/dataproc_jupyter/dataproc2.png" alt="Dataproc2" /></p>
+
+<p>If you&rsquo;d like to deploy Jupyter and Python 3 stack (numpy, sklearn, etc.) use
+source{d}&rsquo;s own script which is publicly available as gs://srcd-dataproc/jupyter.sh
+(duplicated in GitHub <a href="https://gist.github.com/vmarkovtsev/e56fe77562037460585d4de690040da8">gist</a>).</p>
+
+<h2 id="jupyter-sh:971cbc9cc6767562e5cebc6401bc5555">jupyter.sh</h2>
+
+<p>The first thing we must figure out in the initialization script is who we are:
+a master or a worker. This is done by calling</p>
+
+<pre><code>/usr/share/google/get_metadata_value attributes/dataproc-role
+</code></pre>
+
+<p><code>/usr/share/google/get_metadata_value</code> is actually a shell script which executes</p>
+
+<pre><code>curl &quot;http://metadata.google.internal/computeMetadata/v1/instance/attributes/dataproc-role&quot; -H &quot;Metadata-Flavor: Google&quot;
+</code></pre>
+
+<p>The header is important; without it you&rsquo;ll get 403 Forbidden.</p>
+
+<p>Dataproc currently runs on Debian 8.4, which is similar to Ubuntu 16.04 (well,
+actually we should say the opposite). We have <code>apt-get</code> to install system packages
+and we have <code>systemd</code> to manage system services.</p>
+
+<h3 id="workers:971cbc9cc6767562e5cebc6401bc5555">Workers</h3>
+
+<p>Setting up workers is easy: we install Python 3 and the related packages,
+then upgrade pip to the latest version available and install <a href="http://scikit-learn.org/stable/">sklearn</a>,
+<a href="http://pandas.pydata.org/">pandas</a> and friends. One can install them from system
+packages, but they develop rapidly and the latest version is usually the greatest.
+Additionally, we install <a href="https://github.com/GoogleCloudPlatform/gcloud-python">gcloud-python</a> -
+Google Cloud API high level (there also exists a low level) wrapper for Python.</p>
+
+<p>Either master or workers must be prepared for Python 3. We add needed environment
+variables into various Spark configuration files:</p>
+
+<pre><code>echo &quot;export PYSPARK_PYTHON=python3&quot; | tee -a  /etc/profile.d/spark_config.sh  /etc/*bashrc /usr/lib/spark/conf/spark-env.sh
+echo &quot;export PYTHONHASHSEED=0&quot; | tee -a /etc/profile.d/spark_config.sh /etc/*bashrc /usr/lib/spark/conf/spark-env.sh
+echo &quot;spark.executorEnv.PYTHONHASHSEED=0&quot; &gt;&gt; /etc/spark/conf/spark-defaults.conf
+</code></pre>
+
+<p>Those mostly do with Python 3&rsquo;s <a href="https://docs.python.org/3.3/using/cmdline.html#cmdoption-R">hash randomization</a>,
+which is good for security but bad for computation repeatability and stability.</p>
+
+<h3 id="master:971cbc9cc6767562e5cebc6401bc5555">Master</h3>
+
+<p>Master node requires quite a few extra steps. First, we must configure Spark
+to use <code>python3</code> instead of the default <code>python</code> executable which is 2.7.
+There exists a GitHub <a href="https://gist.github.com/cerisier/118c06d1a0147d1fb898218b57ba82a3/">gist</a>
+which does all the work for us. Looks like it closes the discussion at
+<a href="https://github.com/GoogleCloudPlatform/dataproc-initialization-actions/issues/25">GoogleCloudPlatform/dataproc-initialization-actions</a>.</p>
+
+<p>Next, we install the latest IPython and Jupyter with pip. Those two evolve pretty
+fast. IPython 5 for example adds autocompletion with dropdown lists to command
+line Python sessions as well as dynamic coloring:</p>
+
+<p><img src="/post/dataproc_jupyter/ipython.png" alt="IPython" /></p>
+
+<p>Technically, Jupyter is an umbrella package which depends on <code>notebook</code> and many
+others. Some common packages are shared between IPython and Jupyter. It uses
+<a href="https://github.com/tornadoweb/tornado">Tornado</a> as the web server engine.</p>
+
+<p>Next, we create an additional IPython profile codename &ldquo;pyspark&rdquo; with</p>
+
+<pre><code>ipython profile create pyspark
+</code></pre>
+
+<p>IPython has &ldquo;profiles&rdquo; which are sets of various session settings. One can execute
+arbitrary Python code on notebook startup, for example. The latter is exactly our
+case: we need to initialize PySpark&rsquo;s context. Thus we create the file
+<code>~/.ipython/profile_pyspark/startup/00-pyspark-setup.py</code> with the following:</p>
+
+<pre><code class="language-python">import os
+import sys
+
+spark_home = &quot;/usr/lib/spark/&quot;
+os.environ[&quot;SPARK_HOME&quot;] = spark_home
+os.environ[&quot;PYSPARK_PYTHON&quot;] = &quot;python3&quot;
+sys.path.insert(0, os.path.join(spark_home, &quot;python&quot;))
+with open(os.path.join(spark_home, &quot;python/pyspark/shell.py&quot;)) as src:
+    exec(src.read())
+</code></pre>
+
+<p>This is similar to what <code>source</code> does in Bash: we read Python code from
+Spark distribution and execute it inplace. The file contents from above
+are inserted using <a href="https://en.wikipedia.org/wiki/Here_document">heredoc</a>.</p>
+
+<p>Then we must link the created IPython profile to new Jupyter kernel type.
+Jupyter kernel is an instance of notebook which is running. Notebooks may
+be in different languages, environments, etc. When you launch a new kernel,
+you choose the desired kernel type from the list:</p>
+
+<p><img src="/post/dataproc_jupyter/new_kernel.png" alt="new kernel" /></p>
+
+<p>The list can be printed in terminal using <code>jupyter nbextension list</code>.
+Kernel types are registered with JSON files in special kernelspec format.
+We create <code>/usr/local/share/jupyter/kernels/pyspark/kernel.json</code> with</p>
+
+<pre><code class="language-json">{
+ &quot;display_name&quot;: &quot;PySpark 3&quot;,
+ &quot;language&quot;: &quot;python3&quot;,
+ &quot;env&quot;: {&quot;PYTHONHASHSEED&quot;: &quot;0&quot;},
+ &quot;argv&quot;: [
+  &quot;/usr/bin/python3&quot;,
+  &quot;-m&quot;,
+  &quot;IPython.kernel&quot;,
+  &quot;--profile=pyspark&quot;,
+  &quot;-f&quot;,
+  &quot;{connection_file}&quot;
+ ]
+}
+</code></pre>
+
+<p>IPython profile is changed from &ldquo;default&rdquo; to &ldquo;pyspark&rdquo; for that kernel type.
+PYTHONHASHSEED is set to 0 to disable <a href="https://docs.python.org/3.3/using/cmdline.html#cmdoption-R">hash randomization</a>.</p>
+
+<p>The last step we seem to miss is running Jupyter as a system service. We create
+<a href="https://www.freedesktop.org/software/systemd/man/systemd.service.html">systemd</a>
+service file at <code>/lib/systemd/system</code>.</p>
+
+<pre><code class="language-ini">[Unit]
+Description=Jupyter Notebook
+After=hadoop-yarn-resourcemanager.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root
+StandardOutput=/var/log/jupyter.log
+StandardError=/var/log/jupyter.log
+ExecStart=/usr/bin/python3 /usr/local/bin/jupyter notebook --no-browser --ip=* --port=8123
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
+</code></pre>
+
+<p>We launch Jupyter after YARN service starts (Hadoop resource manager) so that
+there will be no boot race conditions. Logs are written to <code>/var/log/jupyter.log</code>.
+If Jupyter process dies, it will be automatically restarted in 1 second (the
+number of restart attempts is constrained). Jupyter listens on all network
+interfaces on port 8123. You can change it 80 for convenience so that you will
+not have to specify port number in web browser.</p>
+
+<p>Finally, we add Jupyter service to autorun and start it</p>
+
+<pre><code class="language-sh">systemctl daemon-reload
+systemctl enable jupyter
+service jupyter start
+</code></pre>
+
+<h2 id="accessing-jupyter-at-dataproc:971cbc9cc6767562e5cebc6401bc5555">Accessing Jupyter at Dataproc</h2>
+
+<p>Now we are going to open Jupyter in our web browser to see it in action.
+The problem is, Dataproc is not exposed to the outer Internet (and shouldn&rsquo;t)
+so we are unable to access our master node at port 8123. The solution is to
+open SSH session with <a href="https://en.wikipedia.org/wiki/SOCKS">SOCKS proxy</a> port
+forwarding using <a href="https://cloud.google.com/sdk/">Google Cloud SDK</a>.</p>
+
+<pre><code class="language-sh">gcloud init
+gcloud compute ssh --ssh-flag=&quot;-D&quot; --ssh-flag=&quot;10000&quot; &quot;&lt;your Dataproc cluster name&gt;-m&quot;
+</code></pre>
+
+<p>Option -D activates proxy mode in <a href="http://www.openssh.com/">OpenSSH</a> which is likely
+your SSH client. 10000 sets the proxy port. &ldquo;-m&rdquo; suffix to host name is necessary
+because master node host name is formed from the whole cluster name by adding &ldquo;-m&rdquo;.</p>
+
+<p>To open the Jupyter UI through the proxy in a Chromium-based browser, execute</p>
+
+<pre><code>chromium-browser &quot;http://&lt;your Dataproc cluster name&gt;-m:8123&quot; --proxy-server=&quot;socks5://localhost:10000&quot; --host-resolver-rules=&quot;MAP * 0.0.0.0 , EXCLUDE localhost&quot; --user-data-dir=/tmp/ --incognito
+</code></pre>
+
+<p>(replace chromium-browser with chrome, etc.)
+If you are using Firefox you can set the proxy address and profile in any of
+it&rsquo;s proxy management extensions, e.g. <a href="https://getfoxyproxy.org/">FoxyProxy</a>.
+When the author of this article tried to setup Chromium with any proxy
+management extension, he hit several issues. The first is that Chromium
+prefetches DNS lookups off the proxy so one has to disable this optimization</p>
+
+<p><img src="/post/dataproc_jupyter/chromium.png" alt="chromium" /></p>
+
+<p>The second is <a href="https://github.com/jupyter/notebook/issues/297">the problem with uBlock</a>.
+Disabling uBlock selectively on &lt;your Dataproc cluster name&gt;-m does not help,
+you have to disable it completely. Thus in the snippet above we launch the browser
+in incognito mode so that extensions are ignored by default. Similar extensions
+like AdBlock work fine.</p>
+
+<p>The third is that the proxy management extension&rsquo;s auto-switch rule must include
+either http or ws (<a href="https://en.wikipedia.org/wiki/WebSocket">WebSocket</a>) templates.
+The resulting rule was <code>(http|ws)://&lt;your Dataproc cluster name&gt;-m.*</code></p>
+
+<p>If these problems are fixed, Jupyter can be used in the normal Chromium/Chrome
+session, without the need to run a separate window.</p>
+
+<h2 id="persistent-notebooks:971cbc9cc6767562e5cebc6401bc5555">Persistent notebooks</h2>
+
+<p>This is where the aforementioned how-to stops. Unfortunately, it forgets to mention
+one very critical thing. Jupyter stores notebooks in the master node&rsquo;s file system.
+Master&rsquo;s disk is not persistent in the way that if it&rsquo;s VM is reset or shut down,
+the file systems loses all the changes. This means that your notebooks will be
+lost as soon as you reset or shutdown the master node. The author of this article
+realized it very quickly, having left some kernel getting the listing from a
+GCS bucket with 10M files for several hours and then having tried to return back
+after the connection teardown. Either because of the lack of free memory (listing
+takes about 1GB and master had 16GB so this seems unlikely) or something else,
+master node stopped responding over SSH and hanged, so it had to be reset.</p>
+
+<p>A natural way to make Jupyter notebooks persistent is to store them in GCS together
+with the data. As a bonus, they become very easy to share. Unfortunately,
+no ready to use solutions exist. Datalab puts focus on visuals and <a href="https://cloud.google.com/datalab/docs/how-to/manage-notebooks">leaves
+notebooks in the local file system</a>.
+There exists a <a href="https://github.com/jupyter/jupyter-drive">project</a>
+which keeps notebooks in Google Drive but it&rsquo;s not quite what we want. With
+a brave spirit, source{d} started to work on GCS adapter for Jupyter on our own.</p>
+
+<p>It appeared much easier than expected at first. Modern versions of Jupyter
+provide a neat way to write backends for the virtual file system. One has
+to derive from <a href="http://jupyter-notebook.readthedocs.io/en/latest/extending/contents.html">ContentsManager</a>,
+implement it&rsquo;s abstract methods, and derive from Checkpoints with
+GenericCheckpointsMixin and implement their abstract methods. Besides, we had to
+write our own test suite because tests for ContentsManager implicitly
+expect FileContentsManager. The result is <a href="https://github.com/src-d/jgscm">src-d/jgscm</a>.</p>
+
+<p><img src="/post/dataproc_jupyter/jupyter.png" alt="jupyter" /></p>
+
+<p>JGSCM is already included in <code>jupyter.sh</code> The tricky part is to fake the timestamp
+at <code>~/.jupyter/migrated</code> before Jupyter&rsquo;s first run so that it does not completely
+remove the configuration directory.</p>
+
+<h2 id="google-cloud-storage-challenges:971cbc9cc6767562e5cebc6401bc5555">Google Cloud Storage Challenges</h2>
+
+<p>From one side, GCS is superior to HDFS, e.g. it allows &ldquo;any&rdquo; number of files
+in the same bucket in contrast to <a href="http://stackoverflow.com/a/34516904/69708">6.4M in HDFS</a>.
+We&rsquo;ve tested it with 10M so far. Of course, this constraint is easily bypassed
+by making a prefix tree file structure, but not having to do it is pretty convenient.
+Another goody is automatic MIME type reporting.</p>
+
+<p>From the other side, there are only files (&ldquo;blobs&rdquo;), no directories. If the name
+of the blob contains slashes &ldquo;/&rdquo;, each segment is treated as a directory
+in Storage Browser. If the name ends with a slash, the blob considered to be
+an empty directory, but it&rsquo;s not really. To prove it, you may create a blob
+with trailing slash and then upload some data to it. You&rsquo;ll succeed and you&rsquo;ll
+fail to download this data in Storage Browser because it displays such blobs
+as directories!</p>
+
+<p>As with HDFS, you cannot easily mount GCS bucket.
+<a href="https://cloud.google.com/storage/docs/gcs-fuse">gcsfuse</a> works (exotically) but
+not backed up officially.</p>
+
+<h2 id="summary:971cbc9cc6767562e5cebc6401bc5555">Summary</h2>
+
+<p>Jupyter, Python 3 and Dataproc can rock together. We created the <a href="https://gist.github.com/vmarkovtsev/e56fe77562037460585d4de690040da8">custom
+initialization script</a>
+and improved the integration with Google Cloud with our <a href="https://github.com/src-d/jgscm">JGSCM</a>.</p>
+
+	        </section>
+
+          <footer class="post-footer">
+              
+
+<section class="author">
+    <div class="authorimage" style="background: url(https://avatars0.githubusercontent.com/u/2793551?v=3&amp;s=460)"></div>
+    <h4>
+      Vadim Markovtsev
+      
+      <a href="//github.com/vmarkovtsev" target="_blank" title="GitHub">
+        <i class="fa fa-2x fa-fw fa-github"></i>
+        <span class="hidden">GitHub</span>
+      </a>
+      
+      
+      <a href="//twitter.com/@tmarkhor" target="_blank" title="Twitter">
+        <i class="fa fa-2x fa-fw fa-twitter"></i>
+        <span class="hidden">Twitter</span>
+      </a>
+      
+    </h4>
+
+    <p class="meta">
+    </p>
+
+    <p class="bio">A former system programmer, Vadim is now a machine learning engineer in love with deep neural networks.</p>
+
+</section>
+
+
+          </footer>
+
+          <section class="mailchimp">  
+            
+            <link href="//cdn-images.mailchimp.com/embedcode/horizontal-slim-10_7.css" rel="stylesheet" type="text/css">
+            <style type="text/css">
+              #mc_embed_signup{background:#fff; clear:left; font:14px Helvetica,Arial,sans-serif; width:100%;}
+               
+            </style>
+            <div id="mc_embed_signup">
+            <form action="//tech.us13.list-manage.com/subscribe/post?u=0eae08951c21c9bca382c2c2e&amp;id=9814bef9fd" method="post" id="mc-embedded-subscribe-form" name="mc-embedded-subscribe-form" class="validate" target="_blank" novalidate>
+                <div id="mc_embed_signup_scroll">
+              <label for="mce-EMAIL">Receive new posts via email</label>
+              <input type="email" value="" name="EMAIL" class="email" id="mce-EMAIL" placeholder="email address" required>
+                
+                <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_0eae08951c21c9bca382c2c2e_9814bef9fd" tabindex="-1" value=""></div>
+                <div class="clear"><input type="submit" value="Subscribe" name="subscribe" id="mc-embedded-subscribe" class="button"></div>
+                </div>
+            </form>
+            </div>
+            
+          </section>
+
+			
+	        	
+	        
+
+			
+
+
+	        <section class="share">
+	            <p class="backtotop"><a data-scroll href="#site-head"><i class="fa fa-lg fa-fw fa-angle-double-up"></i></a><a data-scroll class="backtotoptext" href="#site-head"> Back to top</a></p>
+	            <p class="info prompt">Share</p>
+	            <a href="http://twitter.com/share?text=Setting%20up%20Google%20Cloud%20Dataproc%20with%20Jupyter%20and%20Python%203%20stack&url=%2fpost%2fdataproc_jupyter%2f" title="Share on Twitter"
+	                onclick="window.open(this.href, 'twitter-share', 'width=550,height=235');return false;">
+	                <i class="fa fa-2x fa-fw fa-twitter-square"></i> <span class="hidden">Twitter</span>
+	            </a>
+	            <a href="https://www.facebook.com/sharer/sharer.php?u=%2fpost%2fdataproc_jupyter%2f" title="Share on Facebook"
+	                onclick="window.open(this.href, 'facebook-share','width=580,height=296');return false;">
+	                <i class="fa fa-2x fa-fw fa-facebook-square" style="margin-left: -8px"></i> <span class="hidden">Facebook</span>
+	            </a>
+	            <a href="https://plus.google.com/share?url=%2fpost%2fdataproc_jupyter%2f" title="Share on Google+"
+	               onclick="window.open(this.href, 'google-plus-share', 'width=490,height=530');return false;">
+	                <i class="fa fa-2x fa-fw fa-google-plus-square" style="margin-left: -8px"></i> <span class="hidden">Google+</span>
+	            </a>
+	        </section>
+
+
+	    </article>
+	</main>
+
+    <footer class="site-footer">
+	<div class="inner">
+		<section class="footer-social">
+			
+		    <a href="//twitter.com/srcd_" target="_blank" title="Twitter"><i class="fa fa-2x fa-fw fa-twitter"></i> <span class="hidden">Twitter</span></a>&nbsp;
+		    
+		    
+		    <a href="//github.com/src-d" target="_blank" title="GitHub"><i class="fa fa-2x fa-fw fa-github"></i> <span class="hidden">GitHub</span></a>&nbsp;
+		    
+		    
+		</section>
+
+		<section class="copyright">&copy; 2016 <a href="/">source{d}</a>. Crafted with love.</section>
+	</div>
+</footer>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+<script src="/js/index.js"></script>
+<script src="/js/smooth-scroll.min.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.3/highlight.min.js"></script>
+
+<script>
+    smoothScroll.init({
+        speed: 800,
+        easing: 'easeInOutCubic',
+        updateURL: false,
+        offset: 125,
+    });
+</script>
+<script>hljs.initHighlightingOnLoad();</script>
+
+
+<!-- Google Analytics -->
+<script>
+  var _gaq=[['_setAccount','UA-69608223-2'],['_trackPageview']];
+  (function(d,t){var g=d.createElement(t),s=d.getElementsByTagName(t)[0];
+  g.src=('https:'==location.protocol?'//ssl':'//www')+'.google-analytics.com/ga.js';
+  s.parentNode.insertBefore(g,s)}(document,'script'));
+</script>
+
+
+
+<script>
+   (function(h,o,t,j,a,r){
+       h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
+       h._hjSettings={hjid:184958,hjsv:5};
+       a=o.getElementsByTagName('head')[0];
+       r=o.createElement('script');r.async=1;
+       r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;
+       a.appendChild(r);
+   })(window,document,'//static.hotjar.com/c/hotjar-','.js?sv=');
+</script>
+
+<script type="text/javascript">
+    adroll_adv_id = "IYZYMSZIZZGURCHNYRRKTA";
+    adroll_pix_id = "MXWTIGH3ZNCXDAD4UGQIW5";
+     
+     
+    (function () {
+        var _onload = function(){
+            if (document.readyState && !/loaded|complete/.test(document.readyState)){setTimeout(_onload, 10);return}
+            if (!window.__adroll_loaded){__adroll_loaded=true;setTimeout(_onload, 50);return}
+            var scr = document.createElement("script");
+            var host = (("https:" == document.location.protocol) ? "https://s.adroll.com" : "http://a.adroll.com");
+            scr.setAttribute('async', 'true');
+            scr.type = "text/javascript";
+            scr.src = host + "/j/roundtrip.js";
+            ((document.getElementsByTagName('head') || [null])[0] ||
+                document.getElementsByTagName('script')[0].parentNode).appendChild(scr);
+        };
+        if (window.addEventListener) {window.addEventListener('load', _onload, false);}
+        else {window.attachEvent('onload', _onload)}
+    }());
+</script>
+
+
+</body>
+</html>

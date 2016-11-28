@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta http-equiv="Content-Type" content="text/html" charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+    <title>Towards Yinyang K-means on GPU &middot; source{d} blog</title>
+    <meta name="author" content="source{d}">
+    <meta name="description" content="coding to find awesome engineers">
+    <meta name="generator" content="Hugo 0.15" />
+    <meta name="HandheldFriendly" content="True">
+    <meta name="MobileOptimized" content="320">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+    <link rel="shortcut icon" href="/img/favicon.ico">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/normalize/2.1.2/normalize.min.css">
+
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="/css/screen.css">
+    <link rel="stylesheet" href="/css/github.css">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.3/styles/default.min.css">
+
+    <!-- Stylesheet for theme color -->
+    <style type="text/css">
+    a, a:visited {color: #32526A; font-weight: 600; }
+    .pagination a {color: #111111;}
+    .gist .gist-file .gist-meta a:visited {color: #111111 !important;}
+    a:focus, a:hover {color: #32526A;}
+    h1.post-title, h1.blog-title a, h1.blog-title a {
+      color: #32526A;
+    }
+
+    h1.post-title a:focus, h1.post-title a:hover, h1.blog-title a:focus, h1.blog-title a:hover {
+      color: #000;
+    }
+    .older-posts:hover, .newer-posts:hover {color: #32526A;}
+
+    .post-meta .authorimage {
+      zoom:.5;
+    }
+
+    .post-meta {
+      text-transform: none;
+    }
+
+    .post .post-meta {
+      margin-bottom: 50px;
+    }
+
+    .preview .post-meta p { margin:0; }
+    .preview .post-meta .authorimage {
+      display:none;
+    }
+
+    .preview .image  {
+      height: 90px;
+      margin: auto;
+      overflow: hidden;
+      background-size: cover;
+      background-position: center center;
+    }
+
+    .preview .image img {
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
+    }
+</style>
+
+</head>
+<body class="post-template">
+
+    <div id="nav">
+  <ul class="nav-list">
+    <li class="nav-list-item"><a href="http://sourced.tech">sourced.tech</a></li>
+  </ul>
+</div>
+
+
+<header id="site-head">
+	
+	<h1 class="blog-title"><a href="/">source{d}</a></h1>
+	
+	
+	<h1 class="blog-subtitle">coding to find awesome engineers</h1>
+	
+  <span class="blog-sub-link">Take me to <a href="http://sourced.tech">sourced.tech</a></span>
+</header>
+    
+
+    <main class="content" role="main">
+	    <article class="post">
+	        <header>
+	        <h1 class="post-title">Towards Yinyang K-means on GPU</h1>
+	        <div class="post-meta">
+            
+
+    <div class="authorimage" style="background: url(https://avatars0.githubusercontent.com/u/2793551?v=3&amp;s=460)"></div>
+    <p>
+      by <b>Vadim Markovtsev</b>
+      <time datetime="26 July 2016">26 July 2016</time></div>
+    </p>
+
+
+	        </header>
+	        <section class="post-content">
+	            
+
+<p>The codez: <a href="https://github.com/src-d/kmcuda">GitHub</a>.</p>
+
+<p><a href="http://blog.sourced.tech/post/kmcuda4/">Next article about kmcuda v4.</a></p>
+
+<p>We developed an efficient K-means implementation using <a href="...">NVIDIA CUDA</a>
+technology and this article is devoted to the internals of that project.
+The motivation is simple: we need to cluster a big number of entities
+in high-dimensional space into many clusters as an attempt to simplify
+the data and prepare it for other, more sophisticaed clustering algorithms
+such as <a href="https://lvdmaaten.github.io/tsne/">t-SNE</a>. We named this project kmcuda,
+it offers C and Python3 APIs. kmcuda was successfully applied to problems
+with 4M samples, 40k clusters and 480 dimensions.</p>
+
+<h2 id="theory:79f652027d607e9f286dd0153c47d871">Theory</h2>
+
+<p>Machine learning includes different subfields, one of which is called unsupervised
+learning. This subject focuses on organizing the data without any
+hints from the outside, e.g. labels. It takes some common criteria of
+what is a good data organization based on mathematical assumptions.
+Usually, data is organized into finite amount of clusters, that is, groups.
+So a clustering algorithm takes data and quality metrics on input and
+produces the mapping between each data sample and the corresponding suggested
+cluster identifier.</p>
+
+<p>There are quite a few clustering concepts out there, see <a href="http://scikit-learn.org/stable/modules/clustering.html">sklearn</a>
+for example. Perhaps the most simple and thus widespread concept
+is <a href="https://en.wikipedia.org/wiki/K-means_clustering">K-means</a>. The idea is as
+follows: we fix the desired number of clusters and search for the best
+centroids (cluster centers). &ldquo;Best&rdquo; means that the sum of the distances
+from each cluster member to the corresponding centroid is minimal. There
+exists an easy to implement algorithm named by it&rsquo;s inventor,
+Lloyd, which is guaranteed to converge in L2 metric - when
+the distance is calculated as the square root of the sum of squared differences
+between each dimension coordinate, in other words, Euclidian. Lloyd&rsquo;s approach is often
+confused with K-means problem statement itself, but really it is just one
+of the ways to solve it, the first historically appeared.</p>
+
+<p>Lloyd algorithm is iterative and is made of the repetition of these two
+steps:</p>
+
+<ol>
+<li>Assign each data sample to the cluster to which the distance in minimal among others.</li>
+<li>Calculate each cluster&rsquo;s centroid by averaging all the samples assigned to it.</li>
+</ol>
+
+<p>Though as was written before this algorithm is guaranteed to finish,
+usually we set the tolerance value as the maximum ratio of reassignments
+upon reaching which we can early stop. The ratio of reassignments is the
+number of samples which changed the owning cluster on step 1 divided by
+the overall number of samples. The tolerance is introduced because a
+typical dependency of reassignments ratio from passed iterations number looks
+like this:</p>
+
+<p><img src="/post/towards_kmeans_on_gpu/kmeans.png" alt="kmeans iterations" /></p>
+
+<p>It would take a looong time to wait until the algorithm converges to 0
+and such flawless clustering is usually not needed in real life. The
+tolerance should be set according to the amount of noise in the data,
+though no specific formula exist.</p>
+
+<p>Another important consideration of Lloyd&rsquo;s algorithm is the choice of
+initial centroids. Indeed, we have to know the proto-clusters at the very
+beginning on step 1 in order to assign samples. A naive way to solve this
+problem is to randomly choose samples to be centroids, but it does not
+work well in practice. For example, imagine that we have to put 100 points into 2 groups,
+99 are near (0, 0) and the last one is (1, 1). The K-means solution is,
+of course, clusters with centers (0, 0) and (1, 1), but Lloyd&rsquo;s algorithm
+will never converge to it if we choose initial centroids in the cloud
+of points near (0, 0). The probability of randomly choosing the point (1, 1)
+as the initial cluster center is <sup>1</sup>&frasl;<sub>100</sub> + <sup>99</sup>&frasl;<sub>100</sub> * <sup>1</sup>&frasl;<sub>99</sub> ~ <sup>1</sup>&frasl;<sub>50</sub>, a pretty low
+chance.</p>
+
+<p>An other way to pick initial centroids is <a href="https://en.wikipedia.org/wiki/K-means%2B%2B">K-means++</a>.
+The idea is to still randomly choose samples, but with the probability which is not uniform:
+it is proportional to the distance from each sample to the nearest centroid.
+Thus, in our previous case, the probability of picking (1, 1) becomes
+<sup>1</sup>&frasl;<sub>100</sub> + <sup>99</sup>&frasl;<sub>100</sub> * √<span style="text-decoration: overline;">2</span> / (√<span style="text-decoration: overline;">2</span> + N*ε), where ε is
+the average distance from the other 99 points to (0, 0). We see that
+if ε is very small, the second summand becomes close to 1 and
+we almost always get the right initial centroids. From the theoretical side,
+K-means++ refinement is proven to make Lloyd&rsquo;s process to reach the solution
+not worse than O(log k).</p>
+
+<p><img src="/post/towards_kmeans_on_gpu/pp.png" alt="kmeans++" /></p>
+
+<p>The problem with Lloyd&rsquo;s algorithm, however, is that when the reassignments
+ratio drops, we start to do a lot of redundant work recalculating distances
+corresponding to samples which are not going to change the cluster.
+Since step 1 is much more time consuming than step 2, it becomes critical.</p>
+
+<p>Several solutions have been proposed, and <a href="https://www.microsoft.com/en-us/research/publication/yinyang-k-means-a-drop-in-replacement-of-the-classic-k-means-with-consistent-speedup/">Yinyang</a>
+algorithm is one of them. It was developed at Microsoft Research. The authors compared
+it to the other algorithms and observed a substantial performance boost.
+There are several ideas incorporated into Yinyang; basically, we
+introduce metaclusters and track centroid drifts in each. An exciting
+property of Yinyang is that it yields exactly the same results that
+would be achieved by ordinary Lloyd. The price of the shown performance
+increase is the memory overhead. The overhead size vs. performance is a
+tradeoff, and in real world scenarios if you allow too little extra memory,
+Yinyang becomes slower than Lloyd.</p>
+
+<h2 id="practice:79f652027d607e9f286dd0153c47d871">Practice</h2>
+
+<p>NVIDIA CUDA is an architecture sometimes called SIMT: it involves
+a huge number of concurrently executing hardware threads (say, 3000),
+but with the important constraint: each group of threads (say, 32) must
+execute the same instruction at the same time. In other words, it&rsquo;s
+like running multiple threads each executing SIMD operations. Of course,
+this is a simplification but it should give the general idea.</p>
+
+<p>The power exposed by GPU hardware is impressive: the performance is 10
+times higher compared to CPU and the memory bandwidth is 5 times thicker.
+These are the graphs taken from <a href="http://docs.nvidia.com/cuda/cuda-c-programming-guide">CUDA C Programming Guide</a>.</p>
+
+<p><img src="/post/towards_kmeans_on_gpu/flops.png" alt="flops" /></p>
+
+<p><img src="/post/towards_kmeans_on_gpu/mem.png" alt="memory" /></p>
+
+<p>A typical engineering problem is to be able to cleverly ride that beast
+and allow it to show it&rsquo;s incredible glory. SIMT is not suited for many
+algorithms out there, so if you apply them in a brute-force manner,
+you will get a slowdown compared to a CPU, not a speedup. One would notice
+that 10x boost in memory speed is not proportional to 100x boost in the
+number of threads, so you are likely to end up with a performance bottleneck
+in the memory access.</p>
+
+<p>So, let&rsquo;s concern Lloyd&rsquo;s algorithm first. It maps to CUDA pretty well:
+each thread maps to a data sample and calculates the distances to each
+of the centroids. Since step 2 is not so time consuming, we omit it&rsquo;s
+description for now.</p>
+
+<p>Here is the pseudocode:</p>
+
+<pre><code class="language-python">sample = thread_logical_index()
+min_distance = FLT_MAX
+owner = None
+for cluster in clusters:
+  distance = calculate_distance(sample, cluster)
+  if distance &lt; min_distance:
+    min_distance = distance
+    owner = cluster
+assign(sample, owner)
+</code></pre>
+
+<p>Let&rsquo;s define the benchmark which we will use to evaluate the performance.
+We take 300000 points in 408 dimensions and try to group them into
+5000 clusters with 1% tolerance. We set the initialization method
+to naive random and fix the pseudorandom generator&rsquo;s seed.
+Given Titan X card, the implementation described above finishes in about
+48 minutes. State-of-the-art CPU implementation &ldquo;tyrand lizard king&rdquo;
+(see the comparison <a href="#comparison">below</a>) finishes in 31 minutes.</p>
+
+<p>We can do better. The key to boosting CUDA performance is, of course,
+leveraging the software memory cache called &ldquo;shared memory&rdquo;. Every block
+of CUDA threads (can be adjusted, from 32 to 1024 by step 32) may have
+up to 48 KiB of shared memory, which is accessible by every thread in that
+block (but not the others). The speed of that cache is huge, by several orders
+faster than accessing the ordinary GPU memory (called &ldquo;global memory&rdquo;).
+Let&rsquo;s think of how we can use shared memory here. One consideration that
+we must take into account is that we don&rsquo;t want to impose any severe
+constraints on the number of clusters or the number of dimensions, like
+others do in prior works. Turns out that the only way is to load several
+clusters into the shared memory, calculate the distances to them and
+synchronize threads.</p>
+
+<pre><code class="language-python">sample = thread_logical_index()
+min_distance = FLT_MAX
+owner = None
+for cluster_offset in range(0, clusters_number, chunk_size):
+  clusters_buffer = load_clusters(cluster_offset, chunk_size)
+  for cluster in clusters_buffer:
+    distance = calculate_distance(sample, cluster)
+    if distance &lt; min_distance:
+      min_distance = distance
+      owner = cluster
+assign(sample, owner)
+</code></pre>
+
+<p>This optimization works really good, dropping the run time to 20 minutes.</p>
+
+<p>We still can do better. Every person who tried hard to optimize a native
+function knows about the standard technique called loop unrolling.
+Loop unrolling increases the compiled code size but avoids branching
+which badly influences the performance because of the pipeline stall.
+We are not going to go deep with the details since it
+requires understanding the superscalar CPU architecture, so anyway, this is
+what happens:</p>
+
+<pre><code class="language-python"># before
+for i in range(0, 100500):
+  do_work(i)
+
+# after
+for i in range(0, 100500, 4):
+  do_work(i)
+  do_work(i + 1)
+  do_work(i + 2)
+  do_work(i + 3)
+</code></pre>
+
+<p>Thus we streamline the control flow and reduce the number of comparisons,
+given that the loop is long enough.</p>
+
+<p>The optimization from above is very easy to apply in CUDA code: we just have to
+write <code>#pragma unroll(xxx)</code> above the cycle and the magic happens during the
+compilation. It is cool because we don&rsquo;t have to write the ugly code ourselves!
+The tricky part is to pick up the best &ldquo;xxx&rdquo;. Too small values do not impact that much
+and too big values increase <a href="https://en.wikipedia.org/wiki/Instruction_set#REGISTER-PRESSURE">register pressure</a>.
+In our case, 4 appeared to be optimal. Now the run time drops to 17 minutes.</p>
+
+<p>We can do better! The thing is that there are different memory access patterns
+supported by NVIDIA GPU. If we optimize the memory access for readonly,
+constant and sequential transactions, we can gain in speed, because in our case
+much depends on the memory. There is a way to do it: we must declare
+each hardware pointer as <code>const __restrict__</code>. This will allow the compiler
+to do more aggressive optimizations since we guarantee no [pointer coalescing]
+and actually sets memory transactions to go through the constant access channel,
+which is normally used by GPU textures. And now we finish in 13 minutes.</p>
+
+<p>We can do better! Though the following should be logically done before loop unrolling,
+historically it was done later. The idea is to decompose the L2 distance
+calculation: ∥a - b∥<sub>2</sub> = √<span style="text-decoration: overline;">a</span><sup>2</sup><span style="text-decoration: overline;"> + b</span><sup>2</sup><span style="text-decoration: overline;"> - 2ab</span>.
+We can calculate the scalar product between sample and itself and between
+centroid and itself beforehand, thus leaving only one operation in the loop
+instead of two.</p>
+
+<pre><code class="language-python">ssqr = dot(sample, sample)
+for centroid in centroids:
+    csqr = dot(centroid, centroid)  # done only once during shared loading
+    dist = 0
+    for f in range(number_of_dimensions):
+        dist += sample[i] * centroid[i]
+    dist = sqrt(ssqr + csqr - 2 * dist)
+</code></pre>
+
+<p>What&rsquo;s good is that multiplication and addition is compiled to a single
+<a href="https://en.wikipedia.org/wiki/Multiply%E2%80%93accumulate_operation">fused multiply-add operation</a>.
+Finally, we finish in 12 minutes. Not 7 as one might expect because our
+bottleneck is the memory throughput.</p>
+
+<p>We still can do better! There is one last powerful optimization: tuning the
+block sizes, that is, the topology of the calculations. The maximum block
+size is 1024 and it is optimal in case of zero shared memory usage and
+no internal thread synchronization. All the previous run times were given with
+that block size. But our most time consuming kernels
+(that is, functions which run on GPU in CUDA terminology) use shared memory
+and thus need to synchronize. Setting smaller block size for them allows
+for better hardware load balancing: while some threads wait on the synchronization
+barrier in one warp, they may do useful work in the other.
+The best block size is normally found by experiment and equals to either
+256 or 512. This brings dramatic performance improvement: down to
+7 minutes and 16 seconds.</p>
+
+<p>Can we do better?.. Yes we can, but not with vanilla Lloyd at this time.
+Yinyang code uses much of Lloyd tweaks we suggested before, and finally
+we reach the run time of 4:38. The difference between
+the promised 10x improvement in the paper and the observed 1.5x has to be explained.
+Because of the SIMT nature, if different threads in the same group (warp)
+go by different code paths after a conditional clause, the overall run time
+of the warp will be the sum of the run times of each different path.
+Thus, the extensive branching inside Yinyang does not result in much
+performance boost. The other reason is that we still have to run Lloyd-like
+iterations from time to time in order to make Yinyang iterations perform well
+and the former are slow because of extensive memory writes.</p>
+
+<p>There is a way to further speed up Lloyd a little though, if we properly
+align the lanes in our samples and centroids arrays. It is best to make
+the number of dimensions to be dividable by 32 (512 alignment) as it
+optimizes the memory bandwidth usage. Since it can be done by
+padding sample coordinate vectors with zeros, we omit this optimization.
+Besides, we want to fit as much data as possible because GPU memory
+size is limited, and the alignment can increase it considerably.</p>
+
+<p>An important notice about Yinyang is that if you have much more data than in
+the benchmark, you will not be able to use it at all and have to fallback
+to Lloyd unconditionally.</p>
+
+<p>Final note: some of the code should run on host and OpenMP 4 (SIMD and multithreading)
+is used in the corresponding places.</p>
+
+<h2 id="development:79f652027d607e9f286dd0153c47d871">Development</h2>
+
+<p>The project is being developed in <a href="https://www.jetbrains.com/clion/">CLion IDE</a>.
+Although it does not directly support CUDA, it is still very nice, offering
+very good CMake build system integration. CMake has
+<a href="https://cmake.org/cmake/help/v3.0/module/FindCUDA.html">FindCUDA</a> tools
+so that making a CUDA-powered project is easy.</p>
+
+<p>We used good-ol&rsquo; <a href="http://valgrind.org/">valgrind</a> to validate host code
+and <code>cuda-memcheck</code> for the GPU code. Debugging CUDA programs has become
+convenient these days with the help of <code>cuda-gdb</code>. It is basically
+a custom build of <a href="https://www.gnu.org/software/gdb/">gdb</a> which allows
+for all the usual debugging stuff as if GPU was CPU with the corresponding
+number of threads. Profiling is done with <code>nvvp</code> - NVIDIA Visual Profiler.</p>
+
+<p>The tests are implemented in Python and currently run manually and not included
+into the project. One of the test images is shown in this article&rsquo;s header.</p>
+
+<h2 id="comparison:79f652027d607e9f286dd0153c47d871">Comparison</h2>
+
+<p>CPU: Intel Xeon E5-1650 v3 (supports AVX2, 6+6 threads).</p>
+
+<p>GPU: NVIDIA Titan X (12GB, 3000 cores).</p>
+
+<p>MEM: Samsung M393A2G40DB0-CPB (DDR4, 128GB).</p>
+
+<p>OS: Ubuntu 16.04 x86-64.</p>
+
+<table>
+<thead>
+<tr>
+<th align="left">name</th>
+<th align="right">time</th>
+<th align="right">memory</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td align="left"><a href="http://scikit-learn.org/stable/modules/generated/sklearn.cluster.KMeans.html">sklearn KMeans</a></td>
+<td align="right">&gt;3h<sup>*</sup></td>
+<td align="right">4GB</td>
+</tr>
+
+<tr>
+<td align="left"><a href="https://github.com/michaelchughes/KMeansRex">KMeansRex</a></td>
+<td align="right">31m</td>
+<td align="right">25GB</td>
+</tr>
+
+<tr>
+<td align="left">kmcuda Lloyd</td>
+<td align="right">7m16s</td>
+<td align="right">1GB</td>
+</tr>
+
+<tr>
+<td align="left">kmcuda Yinyang</td>
+<td align="right">4m38s</td>
+<td align="right">6GB</td>
+</tr>
+</tbody>
+</table>
+
+<p><sup>*</sup>We didn&rsquo;t wait more and stopped.</p>
+
+<h2 id="points-of-improvement:79f652027d607e9f286dd0153c47d871">Points of improvement</h2>
+
+<ol>
+<li>Further Yinyang optimization (e.g., clever sorting).</li>
+<li><s>fp16</s> - done.</li>
+<li><s>Multi-GPU</s> - done.</li>
+<li><s>Angular distance metric (aka Spherical K-Means)</s> - done.</li>
+</ol>
+
+<h2 id="conclusion:79f652027d607e9f286dd0153c47d871">Conclusion</h2>
+
+<p>The developed K-means implementation is very fast on moderate data sizes
+and fast on bigger sizes. Besides, it is memory efficient.
+Optimizing CUDA programs is hard but fun, and
+the used techniques are common and not so complicated. Yinyang algorithm is cool,
+though seems to not perfectly fit into the GPU architecture. We hope that Yinyang
+can be further optimized to fully demonstrate it&rsquo;s potential.</p>
+
+	        </section>
+
+          <footer class="post-footer">
+              
+
+<section class="author">
+    <div class="authorimage" style="background: url(https://avatars0.githubusercontent.com/u/2793551?v=3&amp;s=460)"></div>
+    <h4>
+      Vadim Markovtsev
+      
+      <a href="//github.com/vmarkovtsev" target="_blank" title="GitHub">
+        <i class="fa fa-2x fa-fw fa-github"></i>
+        <span class="hidden">GitHub</span>
+      </a>
+      
+      
+      <a href="//twitter.com/@tmarkhor" target="_blank" title="Twitter">
+        <i class="fa fa-2x fa-fw fa-twitter"></i>
+        <span class="hidden">Twitter</span>
+      </a>
+      
+    </h4>
+
+    <p class="meta">
+    </p>
+
+    <p class="bio">A former system programmer, Vadim is now a machine learning engineer in love with deep neural networks.</p>
+
+</section>
+
+
+          </footer>
+
+          <section class="mailchimp">  
+            
+            <link href="//cdn-images.mailchimp.com/embedcode/horizontal-slim-10_7.css" rel="stylesheet" type="text/css">
+            <style type="text/css">
+              #mc_embed_signup{background:#fff; clear:left; font:14px Helvetica,Arial,sans-serif; width:100%;}
+               
+            </style>
+            <div id="mc_embed_signup">
+            <form action="//tech.us13.list-manage.com/subscribe/post?u=0eae08951c21c9bca382c2c2e&amp;id=9814bef9fd" method="post" id="mc-embedded-subscribe-form" name="mc-embedded-subscribe-form" class="validate" target="_blank" novalidate>
+                <div id="mc_embed_signup_scroll">
+              <label for="mce-EMAIL">Receive new posts via email</label>
+              <input type="email" value="" name="EMAIL" class="email" id="mce-EMAIL" placeholder="email address" required>
+                
+                <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_0eae08951c21c9bca382c2c2e_9814bef9fd" tabindex="-1" value=""></div>
+                <div class="clear"><input type="submit" value="Subscribe" name="subscribe" id="mc-embedded-subscribe" class="button"></div>
+                </div>
+            </form>
+            </div>
+            
+          </section>
+
+			
+	        	
+	        
+
+			
+
+
+	        <section class="share">
+	            <p class="backtotop"><a data-scroll href="#site-head"><i class="fa fa-lg fa-fw fa-angle-double-up"></i></a><a data-scroll class="backtotoptext" href="#site-head"> Back to top</a></p>
+	            <p class="info prompt">Share</p>
+	            <a href="http://twitter.com/share?text=Towards%20Yinyang%20K-means%20on%20GPU&url=%2fpost%2ftowards_kmeans_on_gpu%2f" title="Share on Twitter"
+	                onclick="window.open(this.href, 'twitter-share', 'width=550,height=235');return false;">
+	                <i class="fa fa-2x fa-fw fa-twitter-square"></i> <span class="hidden">Twitter</span>
+	            </a>
+	            <a href="https://www.facebook.com/sharer/sharer.php?u=%2fpost%2ftowards_kmeans_on_gpu%2f" title="Share on Facebook"
+	                onclick="window.open(this.href, 'facebook-share','width=580,height=296');return false;">
+	                <i class="fa fa-2x fa-fw fa-facebook-square" style="margin-left: -8px"></i> <span class="hidden">Facebook</span>
+	            </a>
+	            <a href="https://plus.google.com/share?url=%2fpost%2ftowards_kmeans_on_gpu%2f" title="Share on Google+"
+	               onclick="window.open(this.href, 'google-plus-share', 'width=490,height=530');return false;">
+	                <i class="fa fa-2x fa-fw fa-google-plus-square" style="margin-left: -8px"></i> <span class="hidden">Google+</span>
+	            </a>
+	        </section>
+
+
+	    </article>
+	</main>
+
+    <footer class="site-footer">
+	<div class="inner">
+		<section class="footer-social">
+			
+		    <a href="//twitter.com/srcd_" target="_blank" title="Twitter"><i class="fa fa-2x fa-fw fa-twitter"></i> <span class="hidden">Twitter</span></a>&nbsp;
+		    
+		    
+		    <a href="//github.com/src-d" target="_blank" title="GitHub"><i class="fa fa-2x fa-fw fa-github"></i> <span class="hidden">GitHub</span></a>&nbsp;
+		    
+		    
+		</section>
+
+		<section class="copyright">&copy; 2016 <a href="/">source{d}</a>. Crafted with love.</section>
+	</div>
+</footer>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+<script src="/js/index.js"></script>
+<script src="/js/smooth-scroll.min.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.3/highlight.min.js"></script>
+
+<script>
+    smoothScroll.init({
+        speed: 800,
+        easing: 'easeInOutCubic',
+        updateURL: false,
+        offset: 125,
+    });
+</script>
+<script>hljs.initHighlightingOnLoad();</script>
+
+
+<!-- Google Analytics -->
+<script>
+  var _gaq=[['_setAccount','UA-69608223-2'],['_trackPageview']];
+  (function(d,t){var g=d.createElement(t),s=d.getElementsByTagName(t)[0];
+  g.src=('https:'==location.protocol?'//ssl':'//www')+'.google-analytics.com/ga.js';
+  s.parentNode.insertBefore(g,s)}(document,'script'));
+</script>
+
+
+
+<script>
+   (function(h,o,t,j,a,r){
+       h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
+       h._hjSettings={hjid:184958,hjsv:5};
+       a=o.getElementsByTagName('head')[0];
+       r=o.createElement('script');r.async=1;
+       r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;
+       a.appendChild(r);
+   })(window,document,'//static.hotjar.com/c/hotjar-','.js?sv=');
+</script>
+
+<script type="text/javascript">
+    adroll_adv_id = "IYZYMSZIZZGURCHNYRRKTA";
+    adroll_pix_id = "MXWTIGH3ZNCXDAD4UGQIW5";
+     
+     
+    (function () {
+        var _onload = function(){
+            if (document.readyState && !/loaded|complete/.test(document.readyState)){setTimeout(_onload, 10);return}
+            if (!window.__adroll_loaded){__adroll_loaded=true;setTimeout(_onload, 50);return}
+            var scr = document.createElement("script");
+            var host = (("https:" == document.location.protocol) ? "https://s.adroll.com" : "http://a.adroll.com");
+            scr.setAttribute('async', 'true');
+            scr.type = "text/javascript";
+            scr.src = host + "/j/roundtrip.js";
+            ((document.getElementsByTagName('head') || [null])[0] ||
+                document.getElementsByTagName('script')[0].parentNode).appendChild(scr);
+        };
+        if (window.addEventListener) {window.addEventListener('load', _onload, false);}
+        else {window.attachEvent('onload', _onload)}
+    }());
+</script>
+
+
+</body>
+</html>

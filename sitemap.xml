@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  
+  <url>
+    <loc>/</loc>
+    <lastmod>2016-11-24T00:00:00+00:00</lastmod>
+    <priority>0</priority>
+  </url>
+  
+  <url>
+    <loc>/post/minhashcuda/</loc>
+    <lastmod>2016-11-24T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/kmcuda4/</loc>
+    <lastmod>2016-11-23T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/coreos_nano/</loc>
+    <lastmod>2016-11-17T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/github_stars/</loc>
+    <lastmod>2016-11-14T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/reading_pyspark_pickles_locally/</loc>
+    <lastmod>2016-11-08T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/dataproc_lzo/</loc>
+    <lastmod>2016-10-21T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/github_topic_modeling/</loc>
+    <lastmod>2016-09-26T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/tab_vs_spaces/</loc>
+    <lastmod>2016-09-13T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/dataproc_jupyter/</loc>
+    <lastmod>2016-08-15T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/towards_kmeans_on_gpu/</loc>
+    <lastmod>2016-07-26T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/github_stats/</loc>
+    <lastmod>2016-07-06T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/cuda_ldconfig/</loc>
+    <lastmod>2016-06-03T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/100-awesome-women-in-the-open-source-community-you-should-know/</loc>
+    <lastmod>2016-05-25T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/meetup-blame/</loc>
+    <lastmod>2016-02-15T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/reactmad-redux/</loc>
+    <lastmod>2016-02-05T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/dot_go_2015/</loc>
+    <lastmod>2015-11-13T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/deep_learning_summit/</loc>
+    <lastmod>2015-10-19T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/retreat-story/</loc>
+    <lastmod>2015-10-12T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/upcoming/github_topic_modeling_habrahabr/</loc>
+  </url>
+  
+</urlset>

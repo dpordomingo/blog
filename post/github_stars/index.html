@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta http-equiv="Content-Type" content="text/html" charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+    <title>Hands on with the most starred GitHub repositories. &middot; source{d} blog</title>
+    <meta name="author" content="source{d}">
+    <meta name="description" content="coding to find awesome engineers">
+    <meta name="generator" content="Hugo 0.15" />
+    <meta name="HandheldFriendly" content="True">
+    <meta name="MobileOptimized" content="320">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+    <link rel="shortcut icon" href="/img/favicon.ico">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/normalize/2.1.2/normalize.min.css">
+
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="/css/screen.css">
+    <link rel="stylesheet" href="/css/github.css">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.3/styles/default.min.css">
+
+    <!-- Stylesheet for theme color -->
+    <style type="text/css">
+    a, a:visited {color: #32526A; font-weight: 600; }
+    .pagination a {color: #111111;}
+    .gist .gist-file .gist-meta a:visited {color: #111111 !important;}
+    a:focus, a:hover {color: #32526A;}
+    h1.post-title, h1.blog-title a, h1.blog-title a {
+      color: #32526A;
+    }
+
+    h1.post-title a:focus, h1.post-title a:hover, h1.blog-title a:focus, h1.blog-title a:hover {
+      color: #000;
+    }
+    .older-posts:hover, .newer-posts:hover {color: #32526A;}
+
+    .post-meta .authorimage {
+      zoom:.5;
+    }
+
+    .post-meta {
+      text-transform: none;
+    }
+
+    .post .post-meta {
+      margin-bottom: 50px;
+    }
+
+    .preview .post-meta p { margin:0; }
+    .preview .post-meta .authorimage {
+      display:none;
+    }
+
+    .preview .image  {
+      height: 90px;
+      margin: auto;
+      overflow: hidden;
+      background-size: cover;
+      background-position: center center;
+    }
+
+    .preview .image img {
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
+    }
+</style>
+
+</head>
+<body class="post-template">
+
+    <div id="nav">
+  <ul class="nav-list">
+    <li class="nav-list-item"><a href="http://sourced.tech">sourced.tech</a></li>
+  </ul>
+</div>
+
+
+<header id="site-head">
+	
+	<h1 class="blog-title"><a href="/">source{d}</a></h1>
+	
+	
+	<h1 class="blog-subtitle">coding to find awesome engineers</h1>
+	
+  <span class="blog-sub-link">Take me to <a href="http://sourced.tech">sourced.tech</a></span>
+</header>
+    
+
+    <main class="content" role="main">
+	    <article class="post">
+	        <header>
+	        <h1 class="post-title">Hands on with the most starred GitHub repositories.</h1>
+	        <div class="post-meta">
+            
+
+    <div class="authorimage" style="background: url(https://avatars0.githubusercontent.com/u/2793551?v=3&amp;s=460)"></div>
+    <p>
+      by <b>Vadim Markovtsev</b>
+      <time datetime="14 November 2016">14 November 2016</time></div>
+    </p>
+
+
+	        </header>
+	        <section class="post-content">
+	            
+
+<p>Recently I started to collect all the available metadata (name,
+number of stars, forks, watchers, etc.) from the most popular GitHub repositories.
+I chose the &ldquo;number of stargazers&rdquo; as a measure of popularity. This metric
+is by no means perfect, but at least should have a strong positive correlation.
+<details>
+<summary style="cursor: pointer;">How I quickly grabbed all repositories with ≥50 stars (over 120k) using a <span style="text-decoration: line-through;">crappy</span> script.</summary></p>
+
+<p>Seems easy, but the GitHub API limits make it nontrivial. Let me remind you:</p>
+
+<ol>
+<li>Registered users may not issue more than 30 API requests per minute,
+5,000 per hour. This is unpleasant but we can live with this, since only the
+retrieval speed is reduced.</li>
+<li>Search API is limited to 1000 results. This is much worse than (1), because
+it limits the volume of data we can fetch even we have infinite time.</li>
+</ol>
+
+<p>If we go to the GitHub web search and set the query to
+<a href="https://github.com/search?utf8=%E2%9C%93&amp;q=stars%3A%3E%3D50&amp;ref=simplesearch">stars:&gt;=50</a>,
+we will get more than 124,000 results. Apparently, we cannot fetch
+all of them in a single step and have to hack this. I&rsquo;ve always loved to hack,
+so I created <a href="https://github.com/vmarkovtsev/GitHubStars">vmarkovtsev/GitHubStars</a>.
+It is a quick and dirty Python script which fetches Search API results
+in batches. It works in two stages:</p>
+
+<ol>
+<li>Probe GitHub Search API results for specific star intervals.</li>
+<li>Fetch those intervals one by one.</li>
+</ol>
+
+<p>For example, we probe the number of repositories returned from the query
+<code>stars:50..60</code> and get 17,870 results. Too much (we&rsquo;ve have a 1k limit, remember).
+OK, then we probe <code>stars:50..55</code> and get 10,566. Still too much. We continue
+to bisect the interval until we eventually converge to <code>stars:50..50</code>
+with 1,885. That number is bigger than 1000; does it mean we are unable
+to fetch all repositories rated with 50 stars? The answer is no, if we
+apply a trick which I call &ldquo;updated dual-order&rdquo;.</p>
+
+<p>The idea is to sort the response by the last updated date of the repository
+(Search API allows setting different sort keys). We make 2 requests,
+the first with ascending order and the second with descending. We take
+1000 from the first and the last 885 from the second. Thus we extend the
+maximum number of query results to 2k.</p>
+
+<p>The outcome of the first stage is the list of the star intervals we are
+able to consume as a whole, each yielding less than 2000 items.
+Probes are made with the page size equal to 1 and are very fast. The second
+stage alters the page size to 100 (the maximum allowed) and extracts the data.
+Here is how to launch the script:</p>
+
+<pre><code>python3 github_stars.py -i &lt;api token&gt; -o repos.json
+</code></pre>
+
+<p>It takes about 2 hours to finish with my somewhat slow home internet connection.
+We scheduled to record the stars snapshots every week in our production environment.
+</details></p>
+
+<p>This is the log log histogram of the repository-star relation:</p>
+
+<p><img src="/post/github_stars/hist.png" alt="hist.png" /></p>
+
+<p>X axis is the logarithm of the number of stars \(\log S\), Y axis is the logarithm
+of the repositories density \(\log\frac{dR}{dS}\). If we want
+to answer the question, how many repositories are starred between \(S_ {min}\)
+ans \(S_ {max}\), the answer will be \(\int_ {S_ {min}}^{S_ {max}} \limits \frac{dR}{dS} dS\).
+Logarithms are used because the derivative vanishes very quickly as \(S\) grows.
+It is clearly seen that the repositories density drops exponentially as the
+number of stargazers increases. Let&rsquo;s prove the distribution is actually
+<a href="https://en.wikipedia.org/wiki/Log-normal_distribution">log-normal</a>.</p>
+
+<p><img src="/post/github_stars/stats_time.png" alt="statistics time" /></p>
+
+<p>We will use the awesome <a href="https://github.com/jeffalstott/powerlaw">powerlaw</a>
+package to plot the estimated <a href="https://en.wikipedia.org/wiki/Probability_density_function">PDF</a>
+and the log-normal fit.</p>
+
+<pre><code class="language-python">import pickle, numpy, powerlaw
+# Load the repositories metadata from GitHubStars
+with open(&quot;repos.pickle&quot;, &quot;rb&quot;) as fin:
+    repos = pickle.load(fin)
+# Extract the series of star numbers
+stars = numpy.array([r.stargazers_count for r in repos])
+# Fit into all possible discrete distributions with a single awesome line
+# There is no data before 50; the distribution becomes unstable after 1000
+fit = powerlaw.Fit(stars, xmin=50, xmax=1000, discrete=True)
+# Plot the projected and fitted probability distributions
+fit.plot_pdf()
+fit.power_law.plot_pdf(linestyle=&quot;--&quot;)
+</code></pre>
+
+<p><img src="/post/github_stars/fit.png" alt="fit" /></p>
+
+<p>We see that the fit is good. It&rsquo;s parameters are: μ=-15.31, σ=5.23.
+We crop the observed interval by 1000,
+it contains 93% of all the analysed repositories and does not include very high rated
+noisy samples (as seen on the histogram or on full PDF). Those noisy samples
+are unstably, randomly distributed and are not fittable.
+Let&rsquo;s compare the log-normal hypothesis with the
+<a href="https://en.wikipedia.org/wiki/Power_law#Power-law_probability_distributions">power-law</a>
+and <a href="https://en.wikipedia.org/wiki/Exponential_distribution">exponential</a> ones.</p>
+
+<pre><code class="language-python">&gt;&gt;&gt; fit.distribution_compare(&quot;lognormal&quot;, &quot;exponential&quot;, normalized_ratio=True)
+(74.347790532408624, 0.0)
+&gt;&gt;&gt; fit.distribution_compare(&quot;lognormal&quot;, &quot;power_law&quot;, normalized_ratio=True)
+(1.8897939959930001, 0.058785516870108641)
+</code></pre>
+
+<p>These are the handy loglikelihood trials built into powerlaw,
+<a href="http://pythonhosted.org/powerlaw/index.html?highlight=distribution_compare#powerlaw.Fit.distribution_compare">link to the documentation</a>.
+It can be seen that with a 100% confidence the log-normal fit is better than exponential
+and with 94% confidence better than the power-law.</p>
+
+<p>All right, what about the number of forks? Every registered GitHub user can fork
+a repository to his or her personal account, incrementing the corresponding counter of the origin,
+and GitHub API reports those counters&rsquo; values.
+Their distribution appears quite different:</p>
+
+<p><img src="/post/github_stars/forks_hist.png" alt="forks_hist" /></p>
+
+<p>However, it fits well to log-normal within the interval [30, 5000] forks:</p>
+
+<p><img src="/post/github_stars/forks_fit.png" alt="forks_fit" /></p>
+
+<p>Please note: we are plotting in the log-log domain, so the imaginary plateau
+on the histogram is not the &ldquo;real&rdquo; one.</p>
+
+<p>What about the number of open issues?</p>
+
+<p><img src="/post/github_stars/issues_hist.png" alt="issues_hist" /></p>
+
+<p>Fit in [10, 600]:</p>
+
+<p><img src="/post/github_stars/issues_fit.png" alt="issues_fit" /></p>
+
+<p>Thus the majority of the top rated repositories has a small number of open
+issues, particularly 80% have less than 18.</p>
+
+<p>The three mentioned metrics appear to have the same distribution kind.
+Are they actually correlated? A quick shot with
+<a href="http://pandas.pydata.org/pandas-docs/version/0.18.1/visualization.html#scatter-matrix-plot">pandas</a>
+reveals it:</p>
+
+<pre><code class="language-python">dataset = numpy.empty((len(repos), 3), dtype=float32)
+dataset[:, 0] = [log(r.stargazers_count) for r in repos]
+dataset[:, 1] = [log(r.forks_count + 1) for r in repos]
+dataset[:, 2] = [log(r.open_issues_count + 1) for r in repos]
+import pandas
+df = pandas.DataFrame(dataset, columns=[&quot;Stars&quot;, &quot;Forks&quot;, &quot;Open issues&quot;])
+axes = pandas.tools.plotting.scatter_matrix(df, alpha=0.2)
+</code></pre>
+
+<p><img src="/post/github_stars/scatter.png" alt="scatter" /></p>
+
+<p>So the answer is yes, all three are positively correlated. To be precise, here is
+the correlation matrix:</p>
+
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+<th></th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>1.00</td>
+<td>0.72</td>
+<td>0.45</td>
+</tr>
+
+<tr>
+<td>0.72</td>
+<td>1.00</td>
+<td>0.50</td>
+</tr>
+
+<tr>
+<td>0.45</td>
+<td>0.50</td>
+<td>1.00</td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="bonus:ef66b4a263852d8d1ae3996bb12d8d1b">Bonus</h2>
+
+<p>It appeared that some highly rated repositories became ghosts, that is, are empty.</p>
+
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td><a href="https://github.com/openrasta/openrasta">openrasta/openrasta</a></td>
+<td><a href="https://github.com/Habraruby/Ruby-Problems">Habraruby/Ruby-Problems</a></td>
+</tr>
+
+<tr>
+<td><a href="https://github.com/flyth/ts3soundbot">flyth/ts3soundbot</a></td>
+<td><a href="https://github.com/StephanSchmidt/SimpleKanban">StephanSchmidt/SimpleKanban</a></td>
+</tr>
+
+<tr>
+<td><a href="https://github.com/blend2d/b2d">blend2d/b2d</a></td>
+<td><a href="https://github.com/core/wsgicore">core/wsgicore</a></td>
+</tr>
+
+<tr>
+<td><a href="https://github.com/mlpoll/machinematch">mlpoll/machinematch</a></td>
+<td><a href="https://github.com/paulirish/devtools-addons">paulirish/devtools-addons</a></td>
+</tr>
+
+<tr>
+<td><a href="https://github.com/lukelove/AppceleratorRecord">lukelove/AppceleratorRecord</a></td>
+<td><a href="https://github.com/TheKnightsWhoSayNi/info">TheKnightsWhoSayNi/info</a></td>
+</tr>
+
+<tr>
+<td><a href="https://github.com/MozOpenHard/CHIRIMEN">MozOpenHard/CHIRIMEN</a></td>
+<td><a href="https://github.com/go-gitea/gitea_old">go-gitea/gitea_old</a></td>
+</tr>
+
+<tr>
+<td><a href="https://github.com/realworldocaml/book">realworldocaml/book</a></td>
+<td><a href="https://github.com/core/httpcore">core/httpcore</a></td>
+</tr>
+
+<tr>
+<td><a href="https://github.com/DNS-P2P/DNS-P2P">DNS-P2P/DNS-P2P</a></td>
+<td><a href="https://github.com/leoluk/thinkpad-stuff">leoluk/thinkpad-stuff</a></td>
+</tr>
+
+<tr>
+<td><a href="https://github.com/lipeiwei-szu/ONE-API">lipeiwei-szu/ONE-API</a></td>
+<td><a href="https://github.com/Tencent/behaviac">Tencent/behaviac</a></td>
+</tr>
+</tbody>
+</table>
+
+<p>And there are at least two repositories which are empty by design, either serving
+as a wiki or as an issue tracker: <a href="https://github.com/koush/support-wiki">koush/support-wiki</a>
+and <a href="https://github.com/WarEmu/WarBugs">WarEmu/WarBugs</a>.</p>
+
+<script async src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS_CHTML"></script>
+
+	        </section>
+
+          <footer class="post-footer">
+              
+
+<section class="author">
+    <div class="authorimage" style="background: url(https://avatars0.githubusercontent.com/u/2793551?v=3&amp;s=460)"></div>
+    <h4>
+      Vadim Markovtsev
+      
+      <a href="//github.com/vmarkovtsev" target="_blank" title="GitHub">
+        <i class="fa fa-2x fa-fw fa-github"></i>
+        <span class="hidden">GitHub</span>
+      </a>
+      
+      
+      <a href="//twitter.com/@tmarkhor" target="_blank" title="Twitter">
+        <i class="fa fa-2x fa-fw fa-twitter"></i>
+        <span class="hidden">Twitter</span>
+      </a>
+      
+    </h4>
+
+    <p class="meta">
+    </p>
+
+    <p class="bio">A former system programmer, Vadim is now a machine learning engineer in love with deep neural networks.</p>
+
+</section>
+
+
+          </footer>
+
+          <section class="mailchimp">  
+            
+            <link href="//cdn-images.mailchimp.com/embedcode/horizontal-slim-10_7.css" rel="stylesheet" type="text/css">
+            <style type="text/css">
+              #mc_embed_signup{background:#fff; clear:left; font:14px Helvetica,Arial,sans-serif; width:100%;}
+               
+            </style>
+            <div id="mc_embed_signup">
+            <form action="//tech.us13.list-manage.com/subscribe/post?u=0eae08951c21c9bca382c2c2e&amp;id=9814bef9fd" method="post" id="mc-embedded-subscribe-form" name="mc-embedded-subscribe-form" class="validate" target="_blank" novalidate>
+                <div id="mc_embed_signup_scroll">
+              <label for="mce-EMAIL">Receive new posts via email</label>
+              <input type="email" value="" name="EMAIL" class="email" id="mce-EMAIL" placeholder="email address" required>
+                
+                <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_0eae08951c21c9bca382c2c2e_9814bef9fd" tabindex="-1" value=""></div>
+                <div class="clear"><input type="submit" value="Subscribe" name="subscribe" id="mc-embedded-subscribe" class="button"></div>
+                </div>
+            </form>
+            </div>
+            
+          </section>
+
+			
+	        	
+	        
+
+			
+
+
+	        <section class="share">
+	            <p class="backtotop"><a data-scroll href="#site-head"><i class="fa fa-lg fa-fw fa-angle-double-up"></i></a><a data-scroll class="backtotoptext" href="#site-head"> Back to top</a></p>
+	            <p class="info prompt">Share</p>
+	            <a href="http://twitter.com/share?text=Hands%20on%20with%20the%20most%20starred%20GitHub%20repositories.&url=%2fpost%2fgithub_stars%2f" title="Share on Twitter"
+	                onclick="window.open(this.href, 'twitter-share', 'width=550,height=235');return false;">
+	                <i class="fa fa-2x fa-fw fa-twitter-square"></i> <span class="hidden">Twitter</span>
+	            </a>
+	            <a href="https://www.facebook.com/sharer/sharer.php?u=%2fpost%2fgithub_stars%2f" title="Share on Facebook"
+	                onclick="window.open(this.href, 'facebook-share','width=580,height=296');return false;">
+	                <i class="fa fa-2x fa-fw fa-facebook-square" style="margin-left: -8px"></i> <span class="hidden">Facebook</span>
+	            </a>
+	            <a href="https://plus.google.com/share?url=%2fpost%2fgithub_stars%2f" title="Share on Google+"
+	               onclick="window.open(this.href, 'google-plus-share', 'width=490,height=530');return false;">
+	                <i class="fa fa-2x fa-fw fa-google-plus-square" style="margin-left: -8px"></i> <span class="hidden">Google+</span>
+	            </a>
+	        </section>
+
+
+	    </article>
+	</main>
+
+    <footer class="site-footer">
+	<div class="inner">
+		<section class="footer-social">
+			
+		    <a href="//twitter.com/srcd_" target="_blank" title="Twitter"><i class="fa fa-2x fa-fw fa-twitter"></i> <span class="hidden">Twitter</span></a>&nbsp;
+		    
+		    
+		    <a href="//github.com/src-d" target="_blank" title="GitHub"><i class="fa fa-2x fa-fw fa-github"></i> <span class="hidden">GitHub</span></a>&nbsp;
+		    
+		    
+		</section>
+
+		<section class="copyright">&copy; 2016 <a href="/">source{d}</a>. Crafted with love.</section>
+	</div>
+</footer>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+<script src="/js/index.js"></script>
+<script src="/js/smooth-scroll.min.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.3/highlight.min.js"></script>
+
+<script>
+    smoothScroll.init({
+        speed: 800,
+        easing: 'easeInOutCubic',
+        updateURL: false,
+        offset: 125,
+    });
+</script>
+<script>hljs.initHighlightingOnLoad();</script>
+
+
+<!-- Google Analytics -->
+<script>
+  var _gaq=[['_setAccount','UA-69608223-2'],['_trackPageview']];
+  (function(d,t){var g=d.createElement(t),s=d.getElementsByTagName(t)[0];
+  g.src=('https:'==location.protocol?'//ssl':'//www')+'.google-analytics.com/ga.js';
+  s.parentNode.insertBefore(g,s)}(document,'script'));
+</script>
+
+
+
+<script>
+   (function(h,o,t,j,a,r){
+       h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
+       h._hjSettings={hjid:184958,hjsv:5};
+       a=o.getElementsByTagName('head')[0];
+       r=o.createElement('script');r.async=1;
+       r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;
+       a.appendChild(r);
+   })(window,document,'//static.hotjar.com/c/hotjar-','.js?sv=');
+</script>
+
+<script type="text/javascript">
+    adroll_adv_id = "IYZYMSZIZZGURCHNYRRKTA";
+    adroll_pix_id = "MXWTIGH3ZNCXDAD4UGQIW5";
+     
+     
+    (function () {
+        var _onload = function(){
+            if (document.readyState && !/loaded|complete/.test(document.readyState)){setTimeout(_onload, 10);return}
+            if (!window.__adroll_loaded){__adroll_loaded=true;setTimeout(_onload, 50);return}
+            var scr = document.createElement("script");
+            var host = (("https:" == document.location.protocol) ? "https://s.adroll.com" : "http://a.adroll.com");
+            scr.setAttribute('async', 'true');
+            scr.type = "text/javascript";
+            scr.src = host + "/j/roundtrip.js";
+            ((document.getElementsByTagName('head') || [null])[0] ||
+                document.getElementsByTagName('script')[0].parentNode).appendChild(scr);
+        };
+        if (window.addEventListener) {window.addEventListener('load', _onload, false);}
+        else {window.attachEvent('onload', _onload)}
+    }());
+</script>
+
+
+</body>
+</html>

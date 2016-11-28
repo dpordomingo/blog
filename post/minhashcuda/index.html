@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta http-equiv="Content-Type" content="text/html" charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+    <title>Weighted MinHash on GPU helps to find duplicate GitHub repositories. &middot; source{d} blog</title>
+    <meta name="author" content="source{d}">
+    <meta name="description" content="coding to find awesome engineers">
+    <meta name="generator" content="Hugo 0.15" />
+    <meta name="HandheldFriendly" content="True">
+    <meta name="MobileOptimized" content="320">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+    <link rel="shortcut icon" href="/img/favicon.ico">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/normalize/2.1.2/normalize.min.css">
+
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="/css/screen.css">
+    <link rel="stylesheet" href="/css/github.css">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.3/styles/default.min.css">
+
+    <!-- Stylesheet for theme color -->
+    <style type="text/css">
+    a, a:visited {color: #32526A; font-weight: 600; }
+    .pagination a {color: #111111;}
+    .gist .gist-file .gist-meta a:visited {color: #111111 !important;}
+    a:focus, a:hover {color: #32526A;}
+    h1.post-title, h1.blog-title a, h1.blog-title a {
+      color: #32526A;
+    }
+
+    h1.post-title a:focus, h1.post-title a:hover, h1.blog-title a:focus, h1.blog-title a:hover {
+      color: #000;
+    }
+    .older-posts:hover, .newer-posts:hover {color: #32526A;}
+
+    .post-meta .authorimage {
+      zoom:.5;
+    }
+
+    .post-meta {
+      text-transform: none;
+    }
+
+    .post .post-meta {
+      margin-bottom: 50px;
+    }
+
+    .preview .post-meta p { margin:0; }
+    .preview .post-meta .authorimage {
+      display:none;
+    }
+
+    .preview .image  {
+      height: 90px;
+      margin: auto;
+      overflow: hidden;
+      background-size: cover;
+      background-position: center center;
+    }
+
+    .preview .image img {
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
+    }
+</style>
+
+</head>
+<body class="post-template">
+
+    <div id="nav">
+  <ul class="nav-list">
+    <li class="nav-list-item"><a href="http://sourced.tech">sourced.tech</a></li>
+  </ul>
+</div>
+
+
+<header id="site-head">
+	
+	<h1 class="blog-title"><a href="/">source{d}</a></h1>
+	
+	
+	<h1 class="blog-subtitle">coding to find awesome engineers</h1>
+	
+  <span class="blog-sub-link">Take me to <a href="http://sourced.tech">sourced.tech</a></span>
+</header>
+    
+
+    <main class="content" role="main">
+	    <article class="post">
+	        <header>
+	        <h1 class="post-title">Weighted MinHash on GPU helps to find duplicate GitHub repositories.</h1>
+	        <div class="post-meta">
+            
+
+    <div class="authorimage" style="background: url(https://avatars0.githubusercontent.com/u/2793551?v=3&amp;s=460)"></div>
+    <p>
+      by <b>Vadim Markovtsev</b>
+      <time datetime="24 November 2016">24 November 2016</time></div>
+    </p>
+
+
+	        </header>
+	        <section class="post-content">
+	            
+
+<p>The codez: <a href="https://github.com/src-d/minhashcuda">GitHub</a>.</p>
+
+<p><img src="/post/minhashcuda/benders.jpg" alt="benders" /></p>
+
+<p>While doing topic modeling of GitHub repositories, to which we dedicated the recent article
+<a href="http://blog.sourced.tech/post/github_topic_modeling/">Topic Modeling of GitHub Repositories</a>,
+we gradually realized that our dataset should be filtered to achieve better results.
+Particularly, we should throw away &ldquo;extreme forks&rdquo;, the Large Unidentified
+<span style="text-decoration: line-through;">Flying</span> Copy-Pasted
+Codebases. The typical example of such LUCPCs are web site engines, e.g.
+many people copy Wordpress into their repository and build their open-source blogs.
+Numerous github.io sites are the same copy-pasted examples. Folks
+like to learn web programming from books or online manuals copy-pasting the
+sample boilerplates. We are not saying it is wrong; sometimes it is even inevitable,
+sometimes <a href="https://git-scm.com/book/en/v2/Git-Tools-Submodules">git submodules</a>
+seem a bigger evil in spite of all GitHub&rsquo;s efforts to support them. Such duplicates
+are bad for specifically topic modeling since a lot of &ldquo;garbage&rdquo; bags are introduced.</p>
+
+<p>We are working with repositories using the bag-of-names model, which treats
+each codebase as a sparse vector. The number of dimensions equals to the number
+of unique names occurring in all the source code we&rsquo;ve got, the values are equal
+to the corresponding <a href="https://en.wikipedia.org/wiki/Tf%E2%80%93idf">TF-IDF</a>-s
+(the derivatives from frequencies). Names are extracted using the source highlight
+library <a href="http://pygments.org/">pygments</a>, and additionally refined with several tricky heuristics. For example,
+consider the following Python snippet:</p>
+
+<pre><code class="language-python">class WebServer(ServerBase):
+  def route(self, path):
+    raise NotImplementedError()
+</code></pre>
+
+<p>It is transformed into</p>
+
+<pre><code class="language-python">{&quot;web&quot;: 1, &quot;server&quot;: 2, &quot;base&quot;: 1, &quot;route&quot;: 1, &quot;path&quot;: 1}
+</code></pre>
+
+<p>Then we apply frequency filtering, TF-IDF, stemming, etc.</p>
+
+<p>We expect the resulting sparse vectors for duplicate repositories to be
+nearly the same. Of course, some files may contain minor edits and we cannot seek
+for the exact same bag-of-names; we have to make up something smarter. The problem which
+we&rsquo;ve just stated is by no means unique: many Natural Language Processing
+tasks involve the same challenges. Let&rsquo;s revise the common approach: thresholding
+by <a href="https://en.wikipedia.org/wiki/Jaccard_index">Jaccard Similarity</a>.</p>
+
+<h2 id="theory:e60f9f7bf5b66fa2a5351b97e906a1a1">Theory</h2>
+
+<h3 id="minhash:e60f9f7bf5b66fa2a5351b97e906a1a1">MinHash</h3>
+
+<p>Imagine that we have two sets (in mathematical sense) - \(A\) and \(B\). The Jaccard Similarity
+Measure reflects the extent to which our two sets are similar to each other.
+\[J=\frac{\left|A \cap B\right|}{\left|A \cup B\right|}\]
+That is, the power of the set intersection divided by the power of set union. The idea
+is to calculate pairwise \(J\) matrix for all our samples, treat it as a
+mutual similarity graph&rsquo;s <a href="https://en.wikipedia.org/wiki/Incidence_matrix">incidence matrix</a>
+and then pick the <a href="https://en.wikipedia.org/wiki/Clique">cliques</a> which have each
+edges weight above the fixed threshold. There is the problem: we&rsquo;ve got too many
+samples, more than 10 million and we cannot calculate a 10Mx10M matrix in any
+observable future. Luckily for us there is a nice solution to that problem: <a href="https://en.wikipedia.org/wiki/MinHash">MinHash
+algorithm</a>.</p>
+
+<p>There are several modifications of MinHash-ing, they are basically equivalent to each other.
+Let&rsquo;s consider the easiest one. We randomly permute the elements of the union of all sets,
+and enumerate them. We pick the minimum index throughout contained elements for every set.
+We repeat this procedure multiple times, and take the average of the indices, \(h\).
+We call \(h\) &ldquo;MinHash&rdquo;, it is indeed a hash function, but unlike other hashes, it is
+<a href="https://en.wikipedia.org/wiki/Consistent_hashing">consistent</a>: similar
+items tend to yield near hash values. The difference between two MinHash values
+can be proved to approximate the Jaccard Similarity. There is a good blog post
+which explains how to apply the MinHash algorithm to find duplicates:
+<a href="http://stevehanov.ca/blog/index.php?id=144">On removing duplicates from a set of documents</a>.
+Basically, we sort all the hash values and scan them using the window of the size
+which is specially tailored for the tolerated level of false-positives.
+MinHash has an awesome property: there are always no false-negatives, so
+we end up with the same result which we would end up in 10Mx10M brute force.</p>
+
+<h3 id="weighted-minhash:e60f9f7bf5b66fa2a5351b97e906a1a1">Weighted MinHash</h3>
+
+<p>Things change when you&rsquo;ve got a dictionary instead of a set: the keys are still
+unique and values are non-negative &ldquo;weights&rdquo; of the corresponding keys. The Jaccard Similarity
+between dictionaries \(A=\{i: a_ i\}, i\in I\) and \(B=\{j: b_ j\}, j\in J\) is defined as
+\[J=\frac{\sum_ {k\in K}\limits \min(a_ k, b_ k)}{\sum_ {k\in K}\limits \max(a_k, b_k)}, K=I\cup J\]
+where \(a_k = 0, k\notin I\) and \(b_k = 0, k\notin J\). If the weights are
+binary, this formula is equivalent to the common Jaccard Similarity definition.</p>
+
+<p>The corresponding hashing method for the Weighted Jaccard Similarity is named
+&ldquo;Weighted MinHash&rdquo; and described in detail in <a href="http://static.googleusercontent.com/media/research.google.com/en//pubs/archive/36928.pdf">Sergey Ioffe&rsquo;s article</a>.
+His proposed algorithm depends on the parameter \(K\) which adjusts the
+resulting hash length.</p>
+
+<ul>
+<li>for \(k\) in range(\(K\)):
+
+<ol>
+<li>Sample \(r_ k, c_ k ∼ Gamma(2, 1)\) (their PDF is \(P( r)=re^{-r}\)), and
+\(\beta_ k ∼ Uniform(0, 1)\).</li>
+<li>Compute
+$$
+\begin{align}
+t_ k &amp;= \lfloor \frac{\ln S_ k}{r_ k} + \beta_ k\rfloor \\
+y_ k &amp;= e^{r_ k(t_ k - \beta_ k)} \\
+z_ k &amp;= y_ k e^{r_ k} \\
+a_ k &amp;= \frac{c_ k}{z_ k}
+\end{align}
+$$</li>
+</ol></li>
+<li>Find \(k^* = \arg\!\min_ k a_ k\) and return the samples \((k^*, t_ {k^*})\).</li>
+</ul>
+
+<p>Thus given \(K\) and supposing that the integers are 32-bit we obtain the hash
+with size \(8K\) bytes. <a href="https://en.wikipedia.org/wiki/Gamma_distribution">\(Gamma(2, 1)\) distribution</a>
+can be efficiently calculated as \(r = −\ln(u_ 1 u_ 2)\) where \(u_ 1, u_ 2 ∼ Uniform(0, 1)\).</p>
+
+<p>Having calculated all the hashes in the dataset, we can then conduct
+<a href="https://en.wikipedia.org/wiki/Locality-sensitive_hashing">local sensitive hashing</a>,
+an algorithm from <a href="http://infolab.stanford.edu/~ullman/mmds/ch3.pdf">Chapter 3, Mining of Massive Datasets</a>.
+Briefly, we define several hash tables, each for it&rsquo;s own subhash, depending on
+the target level of false positives. Same elements will appear in the same bucket;
+union of the bucket sets across all the hash tables for a specific sample
+yields all the similar samples. If we&rsquo;d like to determine the sets of mutually
+similar samples a.k.a. <a href="https://en.wikipedia.org/wiki/Clique">cliques</a>, we should
+consider the set intersection instead.</p>
+
+<h3 id="minhashcuda:e60f9f7bf5b66fa2a5351b97e906a1a1">MinHashCuda</h3>
+
+<p>The LSH algorithm is actually pretty fast by design, does not require much memory
+and works perfectly, even when implemented in Python (<a href="https://github.com/ekzhu/datasketch">datasketch</a>),
+whereas calculation of the hashes themselves is resource consuming. We&rsquo;ve
+developed an efficient Weighted MinHash calculation library <a href="https://github.com/src-d/minhashcuda">MinHashCuda</a>.
+It allows to offload the heavy-lifting to the GPU(s).</p>
+
+<p>MinHashCuda has two interfaces, C and Python, much like <a href="https://github.com/src-d/kmcuda">kmcuda</a>,
+and actually borrowed quite a lot of boilerplate code from kmcuda. I will use the Python API
+throughout this section. Suppose that we&rsquo;ve got out dataset in the
+<a href="https://en.wikipedia.org/wiki/Sparse_matrix#Compressed_sparse_row_.28CSR.2C_CRS_or_Yale_format.29">compressed sparse row</a>
+format, particularly <a href="https://docs.scipy.org/doc/scipy-0.18.1/reference/generated/scipy.sparse.csr_matrix.html"><code>scipy.sparse.csr_matrix</code></a>.
+In order to feed it to MinHashCuda, first you must initialize the hasher object:</p>
+
+<pre><code class="language-python">import libMHCUDA
+# m is our scipy.sparse.csr_matrix
+# m.shape[-1] is the dimensionality - number of distinct elements in the weighted sets
+hasher = libMHCUDA.minhash_cuda_init(m.shape[-1], 128, seed=1, verbosity=1)
+</code></pre>
+
+<p>Internally, it will leverage <a href="http://docs.nvidia.com/cuda/curand/#axzz4QqWj1Cak">cuRAND</a>,
+NVIDIA&rsquo;s stock random generation library, to generate \(r\), \(c\) and \(\beta\).
+If the precious GPU memory fits those arrays, then you may move along to the hash
+calculation, otherwise some dimensionality reduction is needed. For example,
+the Titan X 2016 has 12GB GDDR5X, so the theoretical limit is \(\frac{12*10^9}{3\cdot sizeof(float)} = 10^9\)
+dimensions. Of course, there must be some room for the samples, so practically
+the maximum dimensionality is about 500 million.</p>
+
+<p>Next, we calculate the hashes. Depending on whether the whole matrix fits into
+the memory, there are two options:</p>
+
+<pre><code class="language-python"># fits
+hashes = libMHCUDA.minhash_cuda_calc(hasher, m)
+
+# does not fit
+hashes = []
+for i in range(0, m.shape[0], chunk):
+  hashes.append(libMHCUDA.minhash_cuda_calc(hasher, m, row_start=i, row_finish=i + chunk))
+hashes = numpy.vstack(hashes)
+</code></pre>
+
+<p>In the latter case, we avoid using <code>m[i:i + chunk]</code> because it creates the new
+matrix and introduces much overhead.</p>
+
+<p>Finally, we free all the allocated resources:</p>
+
+<pre><code class="language-python">libMHCUDA.minhash_cuda_fini(hasher)
+</code></pre>
+
+<h3 id="performance:e60f9f7bf5b66fa2a5351b97e906a1a1">Performance</h3>
+
+<p>As usual, CUDA kernel performance dramatically varies depending on the chosen
+parallelization scheme, occupancy and the benevolence of the evil overlords.
+I had to rewrite it several times until I reached a satisfying result.</p>
+
+<p>The naive method of parallelization would be to assign rows to threads on
+the equivalent basis: each thread takes a row, enters the argmin loop and
+finally writes the whole hash. There are several problems with this approach:</p>
+
+<ol>
+<li>Sparse rows may be severely unbalanced, e.g. one consists of 10 elements and the other has 100000.
+CUDA is <a href="https://en.wikipedia.org/wiki/Single_instruction,_multiple_threads">SIMT</a> and the performance is going to suffer.</li>
+<li>There is no caching, every iteration includes reading the whole row and reading the corresponding
+random values.</li>
+</ol>
+
+<p>The solution to (1) is to split the incoming matrix into row intervals with
+roughly the same number of <em>elements</em>, not <em>rows</em>. (2) is solved by
+caching the partial minimum \(a_ k\) and \((k^*, t_ {k^*})\) into the
+shared memory, so that the row&rsquo;s elements are read only once. There is no
+ability to accurately cache the random values as well because different rows refer to
+arbitrary different column indices. Apart from solving (1) and (2), I had the special
+pleasure to implement multiple GPUs support.</p>
+
+<p>(1) appeared to be harder than it seems. The point is, (2) sets the limit on the
+maximum amount of shared memory per block, so the maximum number of elements
+consumed by each thread is upper bounded. We end up with a discrete optimization
+problem. It resembles <a href="https://en.wikipedia.org/wiki/Bin_packing_problem">bin packing</a>,
+but instead of minimizing the number of bins, it focuses on the overall equal
+load and grouping the bins by CUDA blocks. Here is my solution:</p>
+
+<p><img src="/post/minhashcuda/bins.png" alt="bins" /></p>
+
+<ol>
+<li>Obtain a rough estimate of the number of elements per block, knowing the
+shared memory limit and thriving to distribute some fixed number of elements per thread.
+It approximates the number of CUDA blocks and the overall number of threads \(T\)
+since the CUDA block size is constant. This takes a constant time.</li>
+<li>Sort the rows by the length - \(O(R\log R)\).</li>
+<li>Greedily distribute the rows to the threads, starting from the biggest and
+finishing with the smallest. The row which is loaded the lowest receives the row.
+To efficiently implement this, we maintain the
+<a href="https://en.wikipedia.org/wiki/Priority_queue#Usual_implementation">priority queue</a>,
+getting \(O(R\log T)\) complexity.</li>
+<li>Sort the threads according to the final load. It takes \(O(T\log T)\).</li>
+<li>Split the threads sequence by blocks. Step (4) guarantees the minimum possible
+imbalance.</li>
+</ol>
+
+<p>The overall complexity is thus \(O(R(\log R + \log T) + T\log T) = O(R \log R)\)
+since \(T ∼ R\).</p>
+
+<p>I hit the problems with the low <a href="http://developer.download.nvidia.com/compute/cuda/CUDA_Occupancy_calculator.xls">kernel occupancy</a>.
+The used number of registers was too high. I managed to dramatically reduce the register pressure applying
+<a href="http://blog.icare3d.org/2010/04/cuda-volatile-trick.html">the volatile trick</a>.</p>
+
+<h3 id="battle-tested:e60f9f7bf5b66fa2a5351b97e906a1a1">Battle tested</h3>
+
+<p>We successfully applied <a href="https://github.com/src-d/minhashcuda">MinHashCuda</a> to find duplicate repositories on GitHub.
+The size of our dataset was initially 13.6 million but later was filtered down to 9.6 million.
+To be precise, the matrix was 9624276 x 2422260 with the sparsity 0.00014, which
+is roughly equivalent to 9624276 x 340. We ran the hash calculation on two Titan Xs
+(Maxwell), it took 40 minutes. According to my estimation, the achieved speed is
+600 times faster than the implementation in <code>datasketch</code> using 12 CPU
+cores with <a href="https://en.wikipedia.org/wiki/Math_Kernel_Library">Intel&rsquo;s MKL</a>.</p>
+
+<p>The result after LSH with a similarity threshold of 0.9 was about 467,000 duplicate groups with 1.66 million repositories.
+110,000 repositories appeared to be *.github.io. Here are the examples:</p>
+
+<pre><code>Mange/rtl8192eu-linux-driver
+donahue95/rtl8192eu-linux-driver
+</code></pre>
+
+<pre><code>dcarbajosa/linuxacademy-chef
+jachinh/linuxacademy-chef
+flarotag/linuxacademy-chef
+qhawk/linuxacademy-chef
+paul-e-allen/linuxacademy-chef
+</code></pre>
+
+<pre><code>choysama/my-django-first-blog
+mihuie/django-first
+PubMahesh/my-first-django-app
+nickmalhotra/first-django-blog
+Jmeggesto/MyFirstDjango
+atlwendy/django-first
+susancodes/first-django-app
+quipper7/DjangoFirstProject
+phidang/first-django-blog
+</code></pre>
+
+<p>The complete dataset is published on <a href="https://data.world/vmarkovtsev/github-duplicate-repositories">data.world</a>.</p>
+
+<script async src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS_CHTML"></script>
+
+	        </section>
+
+          <footer class="post-footer">
+              
+
+<section class="author">
+    <div class="authorimage" style="background: url(https://avatars0.githubusercontent.com/u/2793551?v=3&amp;s=460)"></div>
+    <h4>
+      Vadim Markovtsev
+      
+      <a href="//github.com/vmarkovtsev" target="_blank" title="GitHub">
+        <i class="fa fa-2x fa-fw fa-github"></i>
+        <span class="hidden">GitHub</span>
+      </a>
+      
+      
+      <a href="//twitter.com/@tmarkhor" target="_blank" title="Twitter">
+        <i class="fa fa-2x fa-fw fa-twitter"></i>
+        <span class="hidden">Twitter</span>
+      </a>
+      
+    </h4>
+
+    <p class="meta">
+    </p>
+
+    <p class="bio">A former system programmer, Vadim is now a machine learning engineer in love with deep neural networks.</p>
+
+</section>
+
+
+          </footer>
+
+          <section class="mailchimp">  
+            
+            <link href="//cdn-images.mailchimp.com/embedcode/horizontal-slim-10_7.css" rel="stylesheet" type="text/css">
+            <style type="text/css">
+              #mc_embed_signup{background:#fff; clear:left; font:14px Helvetica,Arial,sans-serif; width:100%;}
+               
+            </style>
+            <div id="mc_embed_signup">
+            <form action="//tech.us13.list-manage.com/subscribe/post?u=0eae08951c21c9bca382c2c2e&amp;id=9814bef9fd" method="post" id="mc-embedded-subscribe-form" name="mc-embedded-subscribe-form" class="validate" target="_blank" novalidate>
+                <div id="mc_embed_signup_scroll">
+              <label for="mce-EMAIL">Receive new posts via email</label>
+              <input type="email" value="" name="EMAIL" class="email" id="mce-EMAIL" placeholder="email address" required>
+                
+                <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_0eae08951c21c9bca382c2c2e_9814bef9fd" tabindex="-1" value=""></div>
+                <div class="clear"><input type="submit" value="Subscribe" name="subscribe" id="mc-embedded-subscribe" class="button"></div>
+                </div>
+            </form>
+            </div>
+            
+          </section>
+
+			
+	        	
+	        
+
+			
+
+
+	        <section class="share">
+	            <p class="backtotop"><a data-scroll href="#site-head"><i class="fa fa-lg fa-fw fa-angle-double-up"></i></a><a data-scroll class="backtotoptext" href="#site-head"> Back to top</a></p>
+	            <p class="info prompt">Share</p>
+	            <a href="http://twitter.com/share?text=Weighted%20MinHash%20on%20GPU%20helps%20to%20find%20duplicate%20GitHub%20repositories.&url=%2fpost%2fminhashcuda%2f" title="Share on Twitter"
+	                onclick="window.open(this.href, 'twitter-share', 'width=550,height=235');return false;">
+	                <i class="fa fa-2x fa-fw fa-twitter-square"></i> <span class="hidden">Twitter</span>
+	            </a>
+	            <a href="https://www.facebook.com/sharer/sharer.php?u=%2fpost%2fminhashcuda%2f" title="Share on Facebook"
+	                onclick="window.open(this.href, 'facebook-share','width=580,height=296');return false;">
+	                <i class="fa fa-2x fa-fw fa-facebook-square" style="margin-left: -8px"></i> <span class="hidden">Facebook</span>
+	            </a>
+	            <a href="https://plus.google.com/share?url=%2fpost%2fminhashcuda%2f" title="Share on Google+"
+	               onclick="window.open(this.href, 'google-plus-share', 'width=490,height=530');return false;">
+	                <i class="fa fa-2x fa-fw fa-google-plus-square" style="margin-left: -8px"></i> <span class="hidden">Google+</span>
+	            </a>
+	        </section>
+
+
+	    </article>
+	</main>
+
+    <footer class="site-footer">
+	<div class="inner">
+		<section class="footer-social">
+			
+		    <a href="//twitter.com/srcd_" target="_blank" title="Twitter"><i class="fa fa-2x fa-fw fa-twitter"></i> <span class="hidden">Twitter</span></a>&nbsp;
+		    
+		    
+		    <a href="//github.com/src-d" target="_blank" title="GitHub"><i class="fa fa-2x fa-fw fa-github"></i> <span class="hidden">GitHub</span></a>&nbsp;
+		    
+		    
+		</section>
+
+		<section class="copyright">&copy; 2016 <a href="/">source{d}</a>. Crafted with love.</section>
+	</div>
+</footer>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+<script src="/js/index.js"></script>
+<script src="/js/smooth-scroll.min.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.3/highlight.min.js"></script>
+
+<script>
+    smoothScroll.init({
+        speed: 800,
+        easing: 'easeInOutCubic',
+        updateURL: false,
+        offset: 125,
+    });
+</script>
+<script>hljs.initHighlightingOnLoad();</script>
+
+
+<!-- Google Analytics -->
+<script>
+  var _gaq=[['_setAccount','UA-69608223-2'],['_trackPageview']];
+  (function(d,t){var g=d.createElement(t),s=d.getElementsByTagName(t)[0];
+  g.src=('https:'==location.protocol?'//ssl':'//www')+'.google-analytics.com/ga.js';
+  s.parentNode.insertBefore(g,s)}(document,'script'));
+</script>
+
+
+
+<script>
+   (function(h,o,t,j,a,r){
+       h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
+       h._hjSettings={hjid:184958,hjsv:5};
+       a=o.getElementsByTagName('head')[0];
+       r=o.createElement('script');r.async=1;
+       r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;
+       a.appendChild(r);
+   })(window,document,'//static.hotjar.com/c/hotjar-','.js?sv=');
+</script>
+
+<script type="text/javascript">
+    adroll_adv_id = "IYZYMSZIZZGURCHNYRRKTA";
+    adroll_pix_id = "MXWTIGH3ZNCXDAD4UGQIW5";
+     
+     
+    (function () {
+        var _onload = function(){
+            if (document.readyState && !/loaded|complete/.test(document.readyState)){setTimeout(_onload, 10);return}
+            if (!window.__adroll_loaded){__adroll_loaded=true;setTimeout(_onload, 50);return}
+            var scr = document.createElement("script");
+            var host = (("https:" == document.location.protocol) ? "https://s.adroll.com" : "http://a.adroll.com");
+            scr.setAttribute('async', 'true');
+            scr.type = "text/javascript";
+            scr.src = host + "/j/roundtrip.js";
+            ((document.getElementsByTagName('head') || [null])[0] ||
+                document.getElementsByTagName('script')[0].parentNode).appendChild(scr);
+        };
+        if (window.addEventListener) {window.addEventListener('load', _onload, false);}
+        else {window.attachEvent('onload', _onload)}
+    }());
+</script>
+
+
+</body>
+</html>

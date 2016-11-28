@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta http-equiv="Content-Type" content="text/html" charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+    <title>kmcuda (K-Means on GPU) version 4 is released &middot; source{d} blog</title>
+    <meta name="author" content="source{d}">
+    <meta name="description" content="coding to find awesome engineers">
+    <meta name="generator" content="Hugo 0.15" />
+    <meta name="HandheldFriendly" content="True">
+    <meta name="MobileOptimized" content="320">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+    <link rel="shortcut icon" href="/img/favicon.ico">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/normalize/2.1.2/normalize.min.css">
+
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="/css/screen.css">
+    <link rel="stylesheet" href="/css/github.css">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.3/styles/default.min.css">
+
+    <!-- Stylesheet for theme color -->
+    <style type="text/css">
+    a, a:visited {color: #32526A; font-weight: 600; }
+    .pagination a {color: #111111;}
+    .gist .gist-file .gist-meta a:visited {color: #111111 !important;}
+    a:focus, a:hover {color: #32526A;}
+    h1.post-title, h1.blog-title a, h1.blog-title a {
+      color: #32526A;
+    }
+
+    h1.post-title a:focus, h1.post-title a:hover, h1.blog-title a:focus, h1.blog-title a:hover {
+      color: #000;
+    }
+    .older-posts:hover, .newer-posts:hover {color: #32526A;}
+
+    .post-meta .authorimage {
+      zoom:.5;
+    }
+
+    .post-meta {
+      text-transform: none;
+    }
+
+    .post .post-meta {
+      margin-bottom: 50px;
+    }
+
+    .preview .post-meta p { margin:0; }
+    .preview .post-meta .authorimage {
+      display:none;
+    }
+
+    .preview .image  {
+      height: 90px;
+      margin: auto;
+      overflow: hidden;
+      background-size: cover;
+      background-position: center center;
+    }
+
+    .preview .image img {
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
+    }
+</style>
+
+</head>
+<body class="post-template">
+
+    <div id="nav">
+  <ul class="nav-list">
+    <li class="nav-list-item"><a href="http://sourced.tech">sourced.tech</a></li>
+  </ul>
+</div>
+
+
+<header id="site-head">
+	
+	<h1 class="blog-title"><a href="/">source{d}</a></h1>
+	
+	
+	<h1 class="blog-subtitle">coding to find awesome engineers</h1>
+	
+  <span class="blog-sub-link">Take me to <a href="http://sourced.tech">sourced.tech</a></span>
+</header>
+    
+
+    <main class="content" role="main">
+	    <article class="post">
+	        <header>
+	        <h1 class="post-title">kmcuda (K-Means on GPU) version 4 is released</h1>
+	        <div class="post-meta">
+            
+
+    <div class="authorimage" style="background: url(https://avatars0.githubusercontent.com/u/2793551?v=3&amp;s=460)"></div>
+    <p>
+      by <b>Vadim Markovtsev</b>
+      <time datetime="23 November 2016">23 November 2016</time></div>
+    </p>
+
+
+	        </header>
+	        <section class="post-content">
+	            
+
+<p>Some time ago, I wrote an article about <a href="https://github.com/src-d/kmcuda">src-d/kmcuda</a>
+named <a href="http://blog.sourced.tech/post/towards_kmeans_on_gpu/">Towards Yinyang K-means on GPU</a>.
+Last weekend we released version 4 of that library. Here is the brief list of
+changes:</p>
+
+<ol>
+<li>K-Means iterations can run in parallel on several GPU cards, so
+the elapsed time reduces proportional to the number of GPUs.</li>
+<li>Type of the input samples can be <a href="https://en.wikipedia.org/wiki/Half-precision_floating-point_format">16-bit floating point</a> (fp16),
+so the maximum size of clustered data doubles.</li>
+<li>Distance between points can be calculated with the <a href="https://en.wikipedia.org/wiki/Cosine_similarity#Angular_distance_and_similarity">angular metric</a>,
+thus the clustering algorithm becomes a variant of <a href="http://www.google.com/search?q=spherical+k-means">Spherical K-Means</a>.</li>
+<li>The precision of the calculation of distances was improved at the expense
+of some small computational overhead thanks to <a href="https://en.wikipedia.org/wiki/Kahan_summation_algorithm">Kahan summation</a>.</li>
+<li>Zero-copy device input and output, that is, taking samples from GPU
+memory and writing the results to the preallocated GPU memory.</li>
+<li>Build was much improved: selection of the CUDA device architecture, optional components,
+continuous integration, <a href="https://github.com/pypa/manylinux">PyPi manylinux wheels</a>.</li>
+<li>Extensive test suite was developed.</li>
+</ol>
+
+<p>I will go into details about each of the points.</p>
+
+<h3 id="multi-gpu:0f383f0988f980083ee61048001e3e6d">Multi-GPU</h3>
+
+<p><img src="/post/kmcuda4/nvprof.png" alt="nvprof" /></p>
+
+<p>Clustering on several GPUs at the same time is not straightforward,
+because you cannot simply split the samples into equal parts and
+feed them in parallel. The calculation of the centroids requires having
+all the data in the same place. While there can be workarounds for
+storing the whole dataset in memory, I chose a quicker to implement
+and more performant solution.</p>
+
+<p>Let me recap how the Lloyd&rsquo;s algorithm works:</p>
+
+<ol>
+<li>We calculate the distances between the samples and the centroids,
+pick the centroid with the minimum distance for every sample (assignment stage).</li>
+<li>We update the centroids by averaging all the samples assigned to each
+(centroids stage).</li>
+</ol>
+
+<p>The current multi-gpu scheme is as follows:</p>
+
+<ol>
+<li>We cut the samples into as many intervals as GPUs are available.
+Each GPU works with one interval, calculates the distances and
+writes the local assignments.</li>
+<li>GPUs transfer the assignments to each other in an all to all manner.</li>
+<li>We cut the centroids into the same number of intervals as the number of
+GPUs. Each GPU works with one interval and updates the local centroids.</li>
+<li>GPUs transfer the centroids to each other in an all to all manner.</li>
+</ol>
+
+<p>Steps 2 and 4 require efficient peer to peer communication, and indeed
+I am using <code>cudaMemcpyPeer()</code>. This approach works well with 2 or 4 GPUs,
+but it may produce too much comunication traffic with a bigger number.
+In the future (when I start using 8-GPU installments ;)) I will use NVIDIA&rsquo;s
+awesome <a href="https://github.com/NVIDIA/nccl">nccl</a> library.</p>
+
+<p>Conceptually, nothing changes, and the same parallelization pattern is
+applied to the Yinyang refinement. The devil is in the implementation details,
+as usual.</p>
+
+<p>Enabling peer to peer accees takes quadratic complexity since the
+<code>cudaDeviceEnablePeerAccess()</code> function must be called for every pair
+of GPUs, even for the same pair but reversed. This is surely not an issue
+but still fun.</p>
+
+<p>You have to call <code>cudaSetDevice()</code> before any other CUDA API call or you
+may end up with the wrong device. This is not cool at all and I think
+the weakest part of the whole CUDA runtime API. Setting the device number for
+every API function would be much better, and it would cure all the
+thread safety issues which are currently solved in an ugly manner by the thread local
+context.</p>
+
+<p>You shouldn&rsquo;t mix kernel calls with peer to peer memory exchanges,
+because <code>cudaMemcpyPeerAsync()</code> requires <strong>both</strong> device pipelines
+to become ready. In other words, the following will serialize the computation:</p>
+
+<pre><code class="language-c">for each device {
+  kernel&lt;&lt;&lt;...&gt;&gt;&gt;(...);
+  for all other devices {
+    // wrong - will block other device's stream
+    cudaMemcpyPeerAsync(this device, other device);
+  }
+}
+</code></pre>
+
+<p>But this will work:</p>
+
+<pre><code class="language-c">for each device {
+  kernel&lt;&lt;&lt;...&gt;&gt;&gt;(...);
+}
+// all pipelines are loaded now
+for each device {
+  for all other devices {
+    cudaMemcpyPeerAsync(this device, other device);
+  }
+}
+</code></pre>
+
+<p>I wrapped all the repeating boilerplate code in macros. While I am DRY
+now, I clearly stepped into a macro hell. Here is an example. An innocent
+line which allocates ccounts (centroid assignments counters
+written on stage 1 and read on stage 2)&hellip;</p>
+
+<pre><code>CUMALLOC(device_ccounts, clusters_size);
+</code></pre>
+
+<p>&hellip;is actually&hellip;</p>
+
+<pre><code class="language-c++">do {
+  do {
+    for (int dev : devs) {
+      cudaSetDevice(dev);
+      do {
+        void* __ptr;
+        do {
+          auto __res = cudaMalloc(
+              &amp;__ptr,
+              (clusters_size) *
+                  sizeof(std::remove_reference&lt;decltype(
+                             device_ccounts)&gt;::type::value_type::element_type));
+          if (__res != 0) {
+            do {
+              if (verbosity &gt; 1) {
+                printf(&quot;%s\n&quot;,
+                       &quot;cudaMalloc( &amp;__ptr, (clusters_size) * &quot;
+                       &quot;sizeof(std::remove_reference&lt;decltype(device_ccounts)&gt;:&quot;
+                       &quot;:type::value_type ::element_type))&quot;);
+              }
+            } while (false);
+            do {
+              if (verbosity &gt; 0) {
+                printf(&quot;%s:%d -&gt; %s\n&quot;, &quot;_file_name_&quot;, 301,
+                       cudaGetErrorString(__res));
+              }
+            } while (false);
+            do {
+              if (verbosity &gt; 0) {
+                printf(
+                    &quot;failed to allocate %zu bytes for &quot;
+                    &quot;device_ccounts&quot;
+                    &quot;\n&quot;,
+                    static_cast&lt;size_t&gt;(clusters_size));
+              }
+            } while (false);
+            return kmcudaMemoryAllocationFailure;
+          }
+        } while (false);
+        (device_ccounts)
+            .emplace_back(
+                reinterpret_cast&lt;std::remove_reference&lt;decltype(
+                    device_ccounts)&gt;::type::value_type::element_type*&gt;(__ptr));
+      } while (false);
+    }
+  } while (false);
+} while (false)
+</code></pre>
+
+<p>And this is only one tiny example. I deeply regret what I have done.
+However, I don&rsquo;t see any other ways to stay DRY. Perhaps I should have been WET after all.</p>
+
+<h3 id="fp16:0f383f0988f980083ee61048001e3e6d">fp16</h3>
+
+<p>NVIDIA&rsquo;s <a href="https://en.wikipedia.org/wiki/Pascal_(microarchitecture">Pascal</a>) architecture allows calculations with the half2
+data type - two 16-bit floats packed into a 32-bit struct.</p>
+
+<p><img src="https://devblogs.nvidia.com/wp-content/uploads/2015/07/fp16_format-624x146.png" alt="half and half2" /></p>
+
+<p>All the operations on half and half2 types exist in the form of
+<a href="https://en.wikipedia.org/wiki/Intrinsic_function">compiler intrinsics</a>.
+For example, if you want to sum two half2 values, the following code
+will not be compiled:</p>
+
+<pre><code class="language-c++">__device__ half2 foo(half2 a, half2 b) {
+  return a + b;
+}
+</code></pre>
+
+<p>but this will work:</p>
+
+<pre><code class="language-c++">__device__ half2 foo(half2 a, half2 b) {
+  return __hadd2(a. b);
+}
+</code></pre>
+
+<p>In theory, I should write nice C++ classes which wrap half2 and offer
+overloaded operators, but in practice, there are problems:</p>
+
+<ul>
+<li>They will devastate the performance of the Debug build.</li>
+<li>They will simplify only the limited number of operations: +, - and *
+(division in CUDA is a bad idea - one normally caches the reciprocal
+and uses it later).</li>
+</ul>
+
+<p>So my decision was to wrap the intrinsics into plain functions with
+<a href="https://en.wikipedia.org/wiki/Inline_expansion">inlining</a> forced via
+<code>__forceinline__</code>. Thus the calculation code remains the same for both
+data types, whereas all the fast math is applied properly and there is
+no need for <code>--use-fast-math</code> flag for <code>nvcc</code>. I mean, for example,
+taking the square root from a 32-bit float is performed using
+<code>__fsqrt_rn</code> intrinsic and not the normal <code>sqrt</code> function. The latter
+is translated to the former only if <a href="http://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#options-for-steering-gpu-code-generation">fast math</a>
+is enabled, but the precision may degrade. The fast math switch activates some other
+trade-off optimizations which are not desirable to have in our code.</p>
+
+<p>Although the functions are inlined, they still increased the
+<a href="https://en.wikipedia.org/wiki/Instruction_set#REGISTER-PRESSURE">register pressure</a>
+for some reason, that is, some kernels demanded more registers than they did before.
+While it is not bad for the kernels, the occupancy of which is bounded with the
+shared memory usage, it harms others. I successfully battled with the
+pressure using the <a href="http://blog.icare3d.org/2010/04/cuda-volatile-trick.html">volatile trick</a>:
+if you declare some often used variables as <code>volatile</code>, you force them
+to stick to the same registers and not be inlined. Yet I don&rsquo;t feel
+that I have squeezed everything from that microoptimization, for example,
+Yinyang local filter is eating 40 registers whatever I try to alter.</p>
+
+<h3 id="spherical-k-means:0f383f0988f980083ee61048001e3e6d">Spherical K-Means</h3>
+
+<p><img src="/post/kmcuda4/sphere.png" alt="sphere" /></p>
+
+<p>Sometimes, the L2 distance metric is not the best one in which to do
+clustering. L2, or simply Euclidean, is the square root of the sum of squares:
+$$
+\Delta_ 2(\vec{x}, \vec{y}) = \sqrt{\sum_ i\limits x_ i^2}
+$$
+It takes into account the angle between \(\vec{x}\) and \(\vec{y}\),
+as well as their magnitude. Angular distance equals to the
+angle between two vectors and effectively discards the
+information about the magnitude which may be useful for NLP datasets.
+It is often referred to as the &ldquo;cosine distance&rdquo;: given the formula for
+the scalar product between two vectors \(\vec{x}\cdot\vec{y}=|\vec{x}||\vec{y}|\cos\alpha\),
+the angular distance can be easily calculated:
+$$
+\Delta_ {angle}(\vec{x}, \vec{y}) = \arccos{\frac{\vec{x}\cdot\vec{y}}{|\vec{x}||\vec{y}|}}
+$$
+If we fix the lengths of all the vectors to 1, it becomes even shorter:
+$$
+\Delta_ {angle}(\vec{x}, \vec{y}) = \arccos{\vec{x}\cdot\vec{y}}
+$$</p>
+
+<p>Using this distance metric in K-Means leads us to the variant of
+Spherical K-Means. There are two modifications relative to the
+conventional Lloyd algorithm:</p>
+
+<ol>
+<li>Distance is \(\Delta_ {angle}\).</li>
+<li>Centroids must be renormed to 1 after each iteration (hence &ldquo;spherical&rdquo;).</li>
+</ol>
+
+<p>Both of these modification do not contradict with Yinyang refinement since
+it is based solely on the triangle inequality.</p>
+
+<p>The implementation of the angular distance leveraged templates support in
+CUDA code again. I added the second template parameter (well, actually
+made it the first) and extracted the common routines into <code>__device__ __forceinline__</code>
+functions. I had to use &ldquo;traits&rdquo;-like structures because C++ does not
+support partial template function specialization. Besides, I hit
+the overflow issue with fp16 during the renorming procedure: it involves
+the summation of the squares and the result quickly goes beyond the
+maximum limit for 16-bit floats (\(2^{16}\)). I had to rollback
+to converting from fp16 to fp32 and doing all the operations with
+increased precision in that case. I didn&rsquo;t have such issues with L2
+because the sum of the squared sample elements is always much smaller;
+e.g. 256-dimension vector&rsquo;s squared L2 norm with the average element magnitude
+of 10 is \(256 * 10^2 = 25600 &lt; 2^{16}\). Yet still I would recommend
+to norm the dataset by subtracting the mean and dividing by the dispersion
+when clustering with fp16 and L2.</p>
+
+<p>The kernel invocation code becomes pure
+hell because I had to give birth to this dreaded template switch:</p>
+
+<pre><code class="language-c++">#define KERNEL_SWITCH(f, ...) do { switch (metric) { \
+  case kmcudaDistanceMetricL2: \
+    if (!fp16x2) { \
+        using F = float; \
+        f&lt;kmcudaDistanceMetricL2, float&gt;__VA_ARGS__; \
+    } else { \
+        using F = half2; \
+        f&lt;kmcudaDistanceMetricL2, half2&gt;__VA_ARGS__; \
+    } \
+    break; \
+  case kmcudaDistanceMetricCosine: \
+    if (!fp16x2) { \
+        using F = float; \
+        f&lt;kmcudaDistanceMetricCosine, float&gt;__VA_ARGS__; \
+    } else { \
+        using F = half2; \
+        f&lt;kmcudaDistanceMetricCosine, half2&gt;__VA_ARGS__; \
+    } \
+    break; \
+} } while(false)
+</code></pre>
+
+<pre><code>KERNEL_SWITCH(kmeans_assign_lloyd, &lt;&lt;&lt;sgrid, sblock, shmem_size&gt;&gt;&gt;(
+    length,
+    reinterpret_cast&lt;const F*&gt;(samples[devi].get() + offset * h_features_size),
+    reinterpret_cast&lt;const F*&gt;((*centroids)[devi].get()),
+    (*assignments_prev)[devi].get() + offset,
+    (*assignments)[devi].get() + offset));
+</code></pre>
+
+<p>From a user&rsquo;s perspective, the C API adds <code>metric</code> enumerated parameters
+and the Python API adds <code>metric</code> string parameters.</p>
+
+<h3 id="kahan-summation:0f383f0988f980083ee61048001e3e6d">Kahan summation</h3>
+
+<p><img src="/post/kmcuda4/kahan.png" alt="kahan" /></p>
+
+<p>K-Means (Lloyd) algorithm includes the calculation of the distances
+between two points. Whichever metric is used, it includes the summation
+of some values across all the dimensions. While the number of dimenions
+is low, everything&rsquo;s fine, however, the precision of the summation
+quickly drops as it increases. The cause is the classical loss of
+floating point precision in the addition operation: if you try
+to sum 32-bit float \(2^{20}\) with \(2^{-20}\), the result will be still
+\(2^{10}\) since the
+<a href="https://en.wikipedia.org/wiki/Floating_point#Internal_representation">mantissa</a>
+is saturated. At the time I started the project it wasn&rsquo;t much of an issue
+with 32-bit floats, but became obvious when I added 16-bit floats.</p>
+
+<p>Practically, the loss of precision leads to worse clustering and more
+iterations. To deal with that problem, where possible I decided to use
+Kahan summation with both 32- and 16-bit floats. While it may have slightly degraded
+the performance, the results became more stable and mathematically correct.</p>
+
+<p>Kahan summation is well described on
+<a href="https://en.wikipedia.org/wiki/Kahan_summation_algorithm">Wikipedia</a>. It
+is awesome because it requires only \(O(1)\) space, particularly,
+one additional variable to store the current error correction value.
+Besides, it didn&rsquo;t increase the register pressure in the kernels at all.</p>
+
+<h3 id="zero-copy:0f383f0988f980083ee61048001e3e6d">Zero-copy</h3>
+
+<p><img src="/post/kmcuda4/zero.png" alt="zero" /></p>
+
+<p>The input samples can now be taken from the GPU memory. In that case,
+resulting centroids and cluster are supposed to be allocated on the same GPU
+and written using CUDA memcpy. This feature is activated by <code>device_ptrs</code>
+parameter in C API. If it is negative (the default), the usual behavior
+is retained. Otherwise, it specifies the device number on which samples
+array is allocated. I had a special kind of fun debugging <code>device_ptrs</code>
+with multiple GPUs, but everything should work fine now.</p>
+
+<p>In the case of the Python API, you can pass a tuple with the CUDA pointer,
+the device number and the shape instead of the normal numpy array to
+<code>samples</code> argument. Optionally, that tuple may be extended with
+preallocated centroids and assignments pointers. Normally, Python users
+do not work with the CUDA API directly (see how the tests extract raw pointers
+from pyCUDA or cuda4py arrays).</p>
+
+<h3 id="build:0f383f0988f980083ee61048001e3e6d">Build</h3>
+
+<p><img src="/post/kmcuda4/travis.png" alt="travis" /></p>
+
+<p>Some time ago, the library was compiled for only the hardcoded CUDA device
+architecture 5.2 (Titan X, Maxwell). However, 16-bit float pairs / half2 type are
+not supported by 5.2, they first appeared in 6.0. So I had to add the
+ability to choose the target architecture by defining <code>CUDA_ARCH</code>:</p>
+
+<pre><code>cmake -DCUDA_ARCH=52 ...
+</code></pre>
+
+<p>It should match the set of possible values of <code>nvcc</code>&rsquo;s argument <code>-arch sm_*</code>.</p>
+
+<p>Next, I made the compilation of the Python wrapper optional, since I believe
+that not everybody needs it. It is still compiled by default, but can be
+turned off by defining <code>DISABLE_PYTHON</code>.</p>
+
+<p>kmcuda extensively uses <a href="https://en.wikipedia.org/wiki/C%2B%2B11">C++11</a>
+either in the host or the device code, so <code>nvcc</code> should be passed the
+corresponding flag. <code>cmake</code> propagates the host compiler&rsquo;s options to <code>nvcc</code>,
+but C++11 activation used to be discarded until cmake version 3.3.
+Thanks to NVIDIA&rsquo;s <a href="https://github.com/Kitware/CMake/commit/99abebdea01b9ef73e091db5594553f7b1694a1b">contribution to cmake</a>,
+it&rsquo;s been repaired since then. I had to apply some workaround for older cmake-s
+because TravisCI features outdated Ubuntu 14.04 LTS with an ancient cmake.</p>
+
+<p>Speaking about Travis, yes, I added continuous integration which checks
+whether the library is successfully built. There is no possibility to
+run tests because they require a CUDA device.</p>
+
+<p>Finally, I hit the problem with uploading Python <a href="http://pythonwheels.com/">wheels</a>
+aimed at Linux to the <a href="https://wiki.python.org/moin/CheeseShop">cheese shop</a>.
+Linux wheels are simply not allowed to upload because they are usually
+very sensitive to the environment. Thankfully, there is a nice
+project <a href="https://github.com/pypa/auditwheel">auditwheel</a> which can patch
+the binaries to be less demanding, it works great and produces &ldquo;manylinux&rdquo;
+wheels. Those patched wheels may be successfully uploaded using
+<a href="https://pypi.python.org/pypi/twine">twine</a>. btw. I opened an
+<a href="https://github.com/tensorflow/tensorflow/issues/5033">issue in Tensorflow</a>
+with a similar improvement suggestion.</p>
+
+<h3 id="tests:0f383f0988f980083ee61048001e3e6d">Tests</h3>
+
+<p><img src="/post/kmcuda4/tests.png" alt="tests" /></p>
+
+<p>Since the very beginning, kmcuda has had the Python3 wrapper. The tests
+have been written in Python, which gives several advantages:</p>
+
+<ol>
+<li>Python wrapper code is automatically tested, too.</li>
+<li>No need to compile tests during the build.</li>
+<li>Tests development is much more flexible and easier.</li>
+</ol>
+
+<p>There are 18 tests at the moment. 5 of them are devoted to fp16 and thus
+are skipped if the library is compiled for the 5.2 architecture or older. This is
+provided by the addition of <code>libKMCUDA.supports_fp16</code> Bool variable.</p>
+
+<p>Sometimes tiny changes in the source code lead to a slight divergence
+in the clustering results, which is not always good. The divergence may
+occur on, say, 10-th iteration and lead to 16 iterations instead of 15 overall.
+There must be a reliable way to validate the clustering process. Since
+the C API or Python API do not provide any introspection into it, the only
+solution is to record logs, that is, standard output on the biggest
+verbosity level, and parse them.</p>
+
+<p>Intercepting stdout in Python is usually easy, one monkey-patches
+<code>sys.stdout</code>. However, that works with normal Python scripts only - it
+has nothing to with the real system streams. I had to write
+<code>StdoutListener</code> which temporarily redirects the real stdout file stream:</p>
+
+<pre><code class="language-python">class StdoutListener(object):
+    def __init__(self):
+        self._file = None
+        self._stdout = &quot;&quot;
+        self._stdout_fd_backup = None
+
+    def __enter__(self):
+        self._file = tempfile.TemporaryFile()
+        self._stdout_fd_backup = os.dup(sys.stdout.fileno())
+        os.dup2(self._file.fileno(), sys.stdout.fileno())
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        os.dup2(self._stdout_fd_backup, sys.stdout.fileno())
+        self._file.seek(0)
+        self._stdout = self._file.read().decode(&quot;utf-8&quot;)
+        self._file.close()
+        self._file = None
+        os.close(self._stdout_fd_backup)
+        self._stdout_fd_backup = None
+        print(self._stdout)
+
+    def __str__(self):
+        return self._stdout
+</code></pre>
+
+<p>The intended usage of this class is as follows:</p>
+
+<pre><code class="language-python">stdout = StdoutListener()
+with stdout:
+    # do some stuff
+captured = str(stdout)
+</code></pre>
+
+<p>Internally, it makes the classic dup/dup2 redirection:</p>
+
+<ol>
+<li>Open a temporary file.</li>
+<li>Clone stdout to some backup file descriptor.</li>
+<li>Redirect stdout to the opened temporary file.</li>
+<li>Do some work which prints to stdout, all output goes to the temporary file.</li>
+<li>Restore stdout from the backup so that the subsequent output goes to the terminal again.</li>
+<li>Read the contents of the temporary file and close it.</li>
+</ol>
+
+<p>The second cause of the divergence in test results is the random generator.
+That was foreseen from the very beginning, so I always set the random
+generator&rsquo;s seed before running every test to achieve 100% reproducibility.</p>
+
+<h3 id="summary:0f383f0988f980083ee61048001e3e6d">Summary</h3>
+
+<p>As you see, the new kmcuda has a lot of cool features which have already
+been tested in our production environment. Try it out!
+It&rsquo;s only been tested on Linux but feel free to port it to other platforms.
+Besides, it only supports Python3 and I have no plans to port it to Python2,
+sorry.</p>
+
+<p>If you&rsquo;ve got a new Pascal GPU like Titan X 2016, installing the library
+is as simple as <code>pip3 install libKMCUDA</code>. If your GPU&rsquo;s architecture is older,
+you have to build it from source - please refer to
+<a href="https://github.com/src-d/kmcuda/blob/develop/README.md">README.md</a>.</p>
+
+<script async src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS_CHTML"></script>
+
+	        </section>
+
+          <footer class="post-footer">
+              
+
+<section class="author">
+    <div class="authorimage" style="background: url(https://avatars0.githubusercontent.com/u/2793551?v=3&amp;s=460)"></div>
+    <h4>
+      Vadim Markovtsev
+      
+      <a href="//github.com/vmarkovtsev" target="_blank" title="GitHub">
+        <i class="fa fa-2x fa-fw fa-github"></i>
+        <span class="hidden">GitHub</span>
+      </a>
+      
+      
+      <a href="//twitter.com/@tmarkhor" target="_blank" title="Twitter">
+        <i class="fa fa-2x fa-fw fa-twitter"></i>
+        <span class="hidden">Twitter</span>
+      </a>
+      
+    </h4>
+
+    <p class="meta">
+    </p>
+
+    <p class="bio">A former system programmer, Vadim is now a machine learning engineer in love with deep neural networks.</p>
+
+</section>
+
+
+          </footer>
+
+          <section class="mailchimp">  
+            
+            <link href="//cdn-images.mailchimp.com/embedcode/horizontal-slim-10_7.css" rel="stylesheet" type="text/css">
+            <style type="text/css">
+              #mc_embed_signup{background:#fff; clear:left; font:14px Helvetica,Arial,sans-serif; width:100%;}
+               
+            </style>
+            <div id="mc_embed_signup">
+            <form action="//tech.us13.list-manage.com/subscribe/post?u=0eae08951c21c9bca382c2c2e&amp;id=9814bef9fd" method="post" id="mc-embedded-subscribe-form" name="mc-embedded-subscribe-form" class="validate" target="_blank" novalidate>
+                <div id="mc_embed_signup_scroll">
+              <label for="mce-EMAIL">Receive new posts via email</label>
+              <input type="email" value="" name="EMAIL" class="email" id="mce-EMAIL" placeholder="email address" required>
+                
+                <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_0eae08951c21c9bca382c2c2e_9814bef9fd" tabindex="-1" value=""></div>
+                <div class="clear"><input type="submit" value="Subscribe" name="subscribe" id="mc-embedded-subscribe" class="button"></div>
+                </div>
+            </form>
+            </div>
+            
+          </section>
+
+			
+	        	
+	        
+
+			
+
+
+	        <section class="share">
+	            <p class="backtotop"><a data-scroll href="#site-head"><i class="fa fa-lg fa-fw fa-angle-double-up"></i></a><a data-scroll class="backtotoptext" href="#site-head"> Back to top</a></p>
+	            <p class="info prompt">Share</p>
+	            <a href="http://twitter.com/share?text=kmcuda%20%28K-Means%20on%20GPU%29%20version%204%20is%20released&url=%2fpost%2fkmcuda4%2f" title="Share on Twitter"
+	                onclick="window.open(this.href, 'twitter-share', 'width=550,height=235');return false;">
+	                <i class="fa fa-2x fa-fw fa-twitter-square"></i> <span class="hidden">Twitter</span>
+	            </a>
+	            <a href="https://www.facebook.com/sharer/sharer.php?u=%2fpost%2fkmcuda4%2f" title="Share on Facebook"
+	                onclick="window.open(this.href, 'facebook-share','width=580,height=296');return false;">
+	                <i class="fa fa-2x fa-fw fa-facebook-square" style="margin-left: -8px"></i> <span class="hidden">Facebook</span>
+	            </a>
+	            <a href="https://plus.google.com/share?url=%2fpost%2fkmcuda4%2f" title="Share on Google+"
+	               onclick="window.open(this.href, 'google-plus-share', 'width=490,height=530');return false;">
+	                <i class="fa fa-2x fa-fw fa-google-plus-square" style="margin-left: -8px"></i> <span class="hidden">Google+</span>
+	            </a>
+	        </section>
+
+
+	    </article>
+	</main>
+
+    <footer class="site-footer">
+	<div class="inner">
+		<section class="footer-social">
+			
+		    <a href="//twitter.com/srcd_" target="_blank" title="Twitter"><i class="fa fa-2x fa-fw fa-twitter"></i> <span class="hidden">Twitter</span></a>&nbsp;
+		    
+		    
+		    <a href="//github.com/src-d" target="_blank" title="GitHub"><i class="fa fa-2x fa-fw fa-github"></i> <span class="hidden">GitHub</span></a>&nbsp;
+		    
+		    
+		</section>
+
+		<section class="copyright">&copy; 2016 <a href="/">source{d}</a>. Crafted with love.</section>
+	</div>
+</footer>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+<script src="/js/index.js"></script>
+<script src="/js/smooth-scroll.min.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/8.3/highlight.min.js"></script>
+
+<script>
+    smoothScroll.init({
+        speed: 800,
+        easing: 'easeInOutCubic',
+        updateURL: false,
+        offset: 125,
+    });
+</script>
+<script>hljs.initHighlightingOnLoad();</script>
+
+
+<!-- Google Analytics -->
+<script>
+  var _gaq=[['_setAccount','UA-69608223-2'],['_trackPageview']];
+  (function(d,t){var g=d.createElement(t),s=d.getElementsByTagName(t)[0];
+  g.src=('https:'==location.protocol?'//ssl':'//www')+'.google-analytics.com/ga.js';
+  s.parentNode.insertBefore(g,s)}(document,'script'));
+</script>
+
+
+
+<script>
+   (function(h,o,t,j,a,r){
+       h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
+       h._hjSettings={hjid:184958,hjsv:5};
+       a=o.getElementsByTagName('head')[0];
+       r=o.createElement('script');r.async=1;
+       r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;
+       a.appendChild(r);
+   })(window,document,'//static.hotjar.com/c/hotjar-','.js?sv=');
+</script>
+
+<script type="text/javascript">
+    adroll_adv_id = "IYZYMSZIZZGURCHNYRRKTA";
+    adroll_pix_id = "MXWTIGH3ZNCXDAD4UGQIW5";
+     
+     
+    (function () {
+        var _onload = function(){
+            if (document.readyState && !/loaded|complete/.test(document.readyState)){setTimeout(_onload, 10);return}
+            if (!window.__adroll_loaded){__adroll_loaded=true;setTimeout(_onload, 50);return}
+            var scr = document.createElement("script");
+            var host = (("https:" == document.location.protocol) ? "https://s.adroll.com" : "http://a.adroll.com");
+            scr.setAttribute('async', 'true');
+            scr.type = "text/javascript";
+            scr.src = host + "/j/roundtrip.js";
+            ((document.getElementsByTagName('head') || [null])[0] ||
+                document.getElementsByTagName('script')[0].parentNode).appendChild(scr);
+        };
+        if (window.addEventListener) {window.addEventListener('load', _onload, false);}
+        else {window.attachEvent('onload', _onload)}
+    }());
+</script>
+
+
+</body>
+</html>
